@@ -1,6 +1,6 @@
 # 03 — Máquinas de estado
 
-> Los estados se modifican **solo mediante acciones explícitas** (`submit`, `observe`, `approve`, `authorize`, `close`, `reopen`, etc.), nunca con PATCH arbitrario de `status`. Cada transición registra actor, fecha, estado anterior y resultado en `AuditEvent`.
+> Los estados se modifican **solo mediante acciones explícitas** (`submit`, `observe`, `approve`, `authorize`, `close`, `reopen`, etc.), nunca con PATCH arbitrario de `status`. Cada transición registra actor, fecha, estado anterior y resultado en `AuditEvent`; las transiciones de práctica agregan `PracticeStatusHistory` en la misma transacción.
 
 Convenciones:
 - **[A] = acción del sistema/automática** (derivada, no manual).
@@ -36,29 +36,31 @@ Notas: Aprobada bloquea toda edición; el estudiante nunca sube la carta (RN-03)
 
 ## 2. Documento del expediente (`Document`/`DocumentVersion`)
 
-Estado vigente = estado de la última versión. Cada reenvío crea versión (RN-09).
+El estado vigente del agregado es el de `currentVersion`. La carga o sustitución crea una versión nueva `PENDING`; `submit` transiciona **esa misma versión**. Cada revisión apunta a la versión actual exacta (RN-09).
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Pendiente : carga inicial (validación técnica OK)
-    Pendiente --> En_revision : submit {solo Pendiente u Observado}
-    En_revision --> Observado : observe (comentario) [Coordinador]
-    En_revision --> Aprobado : approve [Coordinador]
-    En_revision --> Anulado : annul (motivo) [Coordinador]
-    Observado --> En_revision : resubmit {nueva versión, nuevo archivo}
-    Aprobado --> [*]
-    Anulado --> [*]
+    [*] --> PENDING : upload/createDigital {nueva versión}
+    PENDING --> PENDING : replace {nueva versión}
+    PENDING --> UNDER_REVIEW : submit {misma versión}
+    UNDER_REVIEW --> OBSERVED : observe (comentario) [Coordinador]
+    UNDER_REVIEW --> APPROVED : approve [Coordinador]
+    UNDER_REVIEW --> ANNULLED : annul (motivo) [Coordinador]
+    OBSERVED --> PENDING : replace {nueva versión}
+    APPROVED --> [*]
+    ANNULLED --> [*]
 ```
 
 | Transición | Acción | Actor | Guardas |
 |---|---|---|---|
-| → Pendiente | `upload` | Estudiante propietario (o docente con evidencia propia) | Validación técnica automática previa: MIME PDF, tamaño configurable, estructura legible (HU-15). |
-| Pendiente/Observado → En revisión | `submit` | Estudiante propietario | Reemplazo solo de Pendientes u Observados (HU-14); nueva versión. |
-| En revisión → Observado | `observe` | Coordinador del campus | Comentario obligatorio vinculado a la versión revisada (HU-16, HU-17). |
-| En revisión → Aprobado | `approve` | Coordinador del campus | Revisión humana; versión inmutable desde entonces (RN-08, RN-09). |
-| En revisión → Anulado | `annul` | Coordinador del campus | Motivo obligatorio; conserva historial (HU-16). |
+| → `PENDING` | `upload` / `createDigital` / `replace` | Estudiante propietario | Snapshot y tipo de evidencia coinciden. PDF: extensión `.pdf`, MIME `application/pdf`, magic bytes `%PDF`, no vacío y tamaño máximo configurable. Registro digital: metadata JSON válida. Crea nueva versión y actualiza `Document.currentVersion/status`. |
+| `PENDING` → `UNDER_REVIEW` | `submit` | Estudiante propietario | Transiciona la versión actual, sin crear otra. |
+| `UNDER_REVIEW` → `OBSERVED` | `observe` | Coordinador del mismo `CampusSchool` | La versión revisada es la actual exacta; comentario obligatorio (HU-16, HU-17). |
+| `UNDER_REVIEW` → `APPROVED` | `approve` | Coordinador del mismo `CampusSchool` | Revisión humana; documento y versión quedan inmutables (RN-08, RN-09). |
+| `UNDER_REVIEW` → `ANNULLED` | `annul` | Coordinador del mismo `CampusSchool` | Motivo obligatorio; conserva historial (HU-16). |
+| `OBSERVED` → `PENDING` | `upload` / `createDigital` | Estudiante propietario | Crea una versión nueva; la versión observada nunca vuelve a enviarse. Después se requiere `submit` para llegar a `UNDER_REVIEW`. |
 
-Notas: la validación automática nunca sustituye la revisión humana (RN-08); aprobado no se sobrescribe ni se elimina físicamente (I-13); la carta es caso especial revisado por Secretaría (ver 02).
+Notas: el flujo agregado `OBSERVED`→`UNDER_REVIEW` requiere dos acciones: nueva evidencia `PENDING` y posterior `submit`. La validación PDF es solo técnica; no hay OCR ni validación de firma o semántica. No existe ruta de borrado y `APPROVED` es terminal e inmutable (I-13); la carta generada por el sistema mantiene su flujo especial (ver 02).
 
 ## 3. Registro de horas (`HourRecord`)
 
@@ -131,38 +133,42 @@ Notas: sin fórmula combinada con la nota empresarial (HU-30); la versión inici
 
 ## 6. Práctica (`Practice`)
 
+Los estados necesarios en la entrega actual son `PREPARATION`, `AUTHORIZED` y `ACTIVE`. Los estados posteriores permanecen planificados para las fases de operación y cierre.
+
 ```mermaid
 stateDiagram-v2
-    [*] --> En_preparacion : create [Estudiante]
-    En_preparacion --> Autorizada : authorize [Coordinador] {checklist inicio OK}
-    En_preparacion --> Cancelada : cancel (motivo) [Coordinador]
-    Autorizada --> Activa : activate {fecha de inicio o acción justificada}
-    Autorizada --> Cancelada : cancel (motivo)
-    Activa --> Suspendida : suspend (motivo)
-    Activa --> En_cierre : beginClosing [Coordinador]
-    Activa --> Cancelada : cancel (motivo)
-    Suspendida --> Activa : reactivate (motivo)
+    [*] --> PREPARATION : create [Estudiante]
+    PREPARATION --> AUTHORIZED : authorize [Coordinador] {checklist inicial OK}
+    AUTHORIZED --> ACTIVE : activate [Coordinador]
+    %% Transiciones planificadas para fases futuras
+    PREPARATION --> Cancelada : cancel (motivo)
+    AUTHORIZED --> Cancelada : cancel (motivo)
+    ACTIVE --> Suspendida : suspend (motivo)
+    ACTIVE --> En_cierre : beginClosing [Coordinador]
+    ACTIVE --> Cancelada : cancel (motivo)
+    Suspendida --> ACTIVE : reactivate (motivo)
     Suspendida --> Cancelada : cancel (motivo)
-    En_cierre --> Finalizada : close [Coordinador] {checklist cierre sin bloqueos}
-    En_cierre --> Activa : reopen (motivo) [Coordinador]
-    Finalizada --> Activa : reopen (motivo) [Coordinador]
+    En_cierre --> Finalizada : close [Coordinador]
+    En_cierre --> ACTIVE : reopen (motivo)
+    En_cierre --> Cancelada : cancel (motivo)
+    Finalizada --> ACTIVE : reopen (motivo)
     Cancelada --> [*]
 ```
 
 | Transición | Acción | Actor | Guardas |
 |---|---|---|---|
-| → En preparación | `create` | Estudiante propietario | Perfil completo; empresa y datos de práctica; carta aprobada vinculada "cuando corresponda" (HU-11). |
-| En preparación → Autorizada | `authorize` | Coordinador del campus | Datos completos y documentos iniciales obligatorios Aprobados (HU-18, I-09). |
-| Autorizada → Activa | `activate` | Coordinador del campus | Fecha de inicio alcanzada o acción justificada (HU-18). |
-| Activa → Suspendida | `suspend` | Coordinador del campus | Motivo, fecha efectiva y responsable (HU-19). |
-| Suspendida → Activa | `reactivate` | Coordinador del campus | Motivo obligatorio. |
-| Activa → En cierre | `beginClosing` | Coordinador del campus | Inicia etapa de cierre (HU-34). |
+| → `PREPARATION` | `create` | Estudiante propietario | Perfil completo; `Company`, `CompanyRepresentative`, `AcademicPeriod` y `CampusSchool` válidos. Captura `representativeSnapshot` y las definiciones `INITIAL` activas; crea sus documentos 1:1. |
+| `PREPARATION` → `AUTHORIZED` | `authorize` | Coordinador del mismo `CampusSchool` | Datos completos y todos los snapshots iniciales obligatorios con documentos `APPROVED` (HU-18, I-09). |
+| `AUTHORIZED` → `ACTIVE` | `activate` | Coordinador del mismo `CampusSchool` | Todos los snapshots iniciales obligatorios siguen `APPROVED`; fecha de inicio alcanzada o acción justificada (HU-18). |
+| `ACTIVE` → Suspendida (futura) | `suspend` | Coordinador del campus | Motivo, fecha efectiva y responsable (HU-19). |
+| Suspendida → `ACTIVE` (futura) | `reactivate` | Coordinador del campus | Motivo obligatorio. |
+| `ACTIVE` → En cierre (futura) | `beginClosing` | Coordinador del campus | Inicia etapa de cierre (HU-34). |
 | En cierre → Finalizada | `close` | Coordinador del campus | Checklist de cierre sin bloqueos (HU-34, HU-35); bloquea nuevas horas/documentos ordinarios. |
-| En cierre/Activa → Cancelada | `cancel` | Coordinador del campus | Motivo; conserva documentos, horas y evaluaciones (HU-19). |
-| Finalizada → Activa | `reopen` | Coordinador del campus | Motivo; habilita correcciones excepcionales (HU-35). |
-| En preparación/Autorizada/Activa/Suspendida → Cancelada | `cancel` | Coordinador del campus | Motivo obligatorio. |
+| En cierre/`ACTIVE` → Cancelada (futura) | `cancel` | Coordinador del campus | Motivo; conserva documentos, horas y evaluaciones (HU-19). |
+| Finalizada → `ACTIVE` (futura) | `reopen` | Coordinador del campus | Motivo; habilita correcciones excepcionales (HU-35). |
+| `PREPARATION`/`AUTHORIZED`/`ACTIVE`/Suspendida → Cancelada (futura) | `cancel` | Coordinador del campus | Motivo obligatorio. |
 
-Notas: Finalizar una práctica no implica cumplir la meta total (HU-35); el cambio de empresa genera un nuevo expediente, no una edición (HU-19, DEC-04).
+Notas: cada transición escribe `PracticeStatusHistory` y `AuditEvent`, ambos append-only, atómicamente con el estado. Empresa, representante elegido y `representativeSnapshot` no se cambian; una empresa distinta exige un expediente nuevo. Finalizar una práctica no implica cumplir la meta total (HU-35).
 
 ## 7. Cumplimiento PPP (derivado por estudiante)
 
@@ -190,4 +196,4 @@ Notas: fronteras 699/700 probadas en testing (TK-144); el estado se recalcula tr
 
 - `Vencida` (supervisión): derivada por fecha; se materializa mediante evaluación perezosa o tarea programada; nunca manual.
 - Reintentar `submit`, `resubmit` o `approve` al alcanzar el mismo estado devuelve el recurso ya transicionado; las demás repeticiones inválidas devuelven `409` con transiciones permitidas. `Idempotency-Key` puede acompañar los comandos de envío (TK-030).
-- Toda transición persiste en la misma transacción: cambio de estado + `AuditEvent` (I-15, RNF-04).
+- Toda transición persiste en la misma transacción: cambio de estado + `AuditEvent`; para `Practice`, también `PracticeStatusHistory` append-only (I-15, RNF-04).

@@ -21,7 +21,7 @@ Cada permiso es una tupla:
 
 ### 1.1. Reglas de ámbito
 
-- R-A1: `SECRETARY` y `COORDINATOR` operan **exclusivamente sobre su campus** (RN-10); su `UserRole.campusId` es obligatorio y toda consulta lo filtra.
+- R-A1: `SECRETARY` y `COORDINATOR` operan **exclusivamente sobre su campus y escuela** (RN-10); su asignación de rol declara ambos y cada recurso se contrasta con su `CampusSchool`.
 - R-A2: `SUPERVISOR` accede solo a prácticas con `PracticeAssignment` vigente hacia su usuario (HU-21).
 - R-A3: `STUDENT` accede solo a entidades donde es propietario (perfil, cartas, prácticas, registros) (HU-03).
 - R-A4: `AUDITOR` lee los tres campus y **nunca** escribe; ninguna transición ni comando acepta su rol (HU-43, I-17).
@@ -64,11 +64,12 @@ Condiciones: observar/anular exigen comentario; aprobar bloquea datos y genera P
 | Acción | SYSTEM_ADMIN | AUDITOR | COORDINATOR | SECRETARY | SUPERVISOR | STUDENT |
 |---|---|---|---|---|---|---|
 | Buscar empresa por RUC | — | — | Campus L | — | — | Propio E (búsqueda para su uso) |
-| Registrar/actualizar empresa | — | — | Campus E | — | — | Propio E (actualización auditada) |
-| Crear expediente de práctica | — | — | Campus E | — | — | Propio E |
-| Editar práctica **En preparación** | — | — | Campus E | — | — | Propio E |
-| Autorizar práctica | — | — | Campus E (exige checklist de inicio) | — | — | — |
-| Activar práctica | — | — | Campus E (fecha de inicio o acción justificada) | — | — | — |
+| Registrar/actualizar empresa reutilizable | — | — | Campus E | — | — | Propio E (actualización auditada) |
+| Registrar representante sin cuenta | — | — | Campus E | — | — | Propio E |
+| Crear expediente de práctica | — | — | — | — | — | Propio E (`PREPARATION`) |
+| Editar práctica **En preparación** | — | — | — | — | — | Propio E |
+| Autorizar práctica | — | — | CampusSchool E (exige checklist inicial) | — | — | — |
+| Activar práctica | — | — | CampusSchool E (fecha de inicio o acción justificada) | — | — | — |
 | Suspender/cancelar/reactivar práctica | — | — | Campus E (motivo obligatorio) | — | — | — |
 | Mover a En cierre | — | — | Campus E | — | — | — |
 | Finalizar práctica | — | — | Campus E (checklist de cierre sin bloqueos) | — | — | — |
@@ -78,20 +79,22 @@ Condiciones: observar/anular exigen comentario; aprobar bloquea datos y genera P
 | Asignar/reasignar supervisor | — | — | Campus E (docentes activos del campus; motivo en reasignación) | — | — | — |
 | Importar prácticas activas | — | — | Campus E (plantilla controlada, validación previa) | — | — | — |
 
-Condiciones: la autorización exige datos completos y documentos iniciales obligatorios Aprobados (HU-18, I-09); cambiar de empresa crea nuevo expediente (no se sobrescribe); práctica no autorizada no admite horas ni evaluaciones.
+Condiciones: la práctica conserva empresa, representante elegido y `representativeSnapshot`; editar esos catálogos nunca la modifica y cambiar de empresa crea un expediente nuevo. Autorizar y activar exigen que todos los snapshots iniciales obligatorios tengan documento `APPROVED` (HU-18, I-09); una práctica no autorizada no admite horas ni evaluaciones.
 
 ### 2.4. Documentos del expediente
 
 | Acción | SYSTEM_ADMIN | AUDITOR | COORDINATOR | SECRETARY | SUPERVISOR | STUDENT |
 |---|---|---|---|---|---|---|
-| Cargar documento de su expediente | — | — | — | — | Evidencia propia E (supervisión) | Propio E (solo Pendiente/Observado o tipo nuevo) |
-| Reemplazar documento | — | — | — | — | — | Propio E (solo Pendiente/Observado; nueva versión) |
+| Cargar PDF para requisito de su expediente | — | — | — | — | — | Propio E (snapshot `PDF`; crea versión `PENDING`) |
+| Crear/reemplazar registro digital | — | — | — | — | — | Propio E (snapshot `DIGITAL_RECORD`; crea versión `PENDING`) |
+| Reemplazar evidencia | — | — | — | — | — | Propio E (solo `PENDING`/`OBSERVED`; nueva versión) |
+| Enviar versión actual | — | — | — | — | — | Propio E (`PENDING`→`UNDER_REVIEW`, misma versión) |
 | Revisión documental (aprobar/observar/anular) | — | — | Campus E (motivo si observar/anular) | Solo carta E | — | — |
 | Ver versiones y comentarios | — | Tres campus L | Campus L | Campus L (cartas) | Asignado L (solo lectura) | Propio L |
-| Descargar archivo (autorización temporal) | — | Tres campus L | Campus L | Campus L | Asignado L | Propio L |
+| Descargar versión PDF por endpoint autorizado | — | Tres campus L | CampusSchool L | CampusSchool L | Asignado L | Propio L |
 | Ver documento aprobado | — | Tres campus L | Campus L | Campus L | Asignado L | Propio L |
 
-Condiciones: validación técnica automática previa (MIME PDF, tamaño configurable, estructura); aprobados inmutables y nunca eliminados físicamente; descargas sensibles auditadas.
+Condiciones: cada revisión apunta a la versión actual exacta. `OBSERVED` solo se corrige creando otra versión `PENDING` y enviándola; `APPROVED` congela documento y versión. No hay ruta de borrado. Para PDF solo se validan extensión `.pdf`, MIME `application/pdf`, bytes mágicos `%PDF`, contenido no vacío y tamaño máximo configurable; no hay OCR ni validación de firma o semántica. Los bytes no están en la base y toda descarga pasa por el endpoint autorizado y genera auditoría; un registro digital no tiene descarga.
 
 ### 2.5. Horas
 

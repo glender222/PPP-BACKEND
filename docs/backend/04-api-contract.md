@@ -13,7 +13,7 @@
 | Idempotencia | `Idempotency-Key` en acciones de envío (submit/resubmit/approve…) para evitar duplicados (TK-030). |
 | Paginación | `?page&limit` (máx 100); respuesta con `{ data, meta }`. |
 | Filtros | `?campusId&schoolId&periodId&estado&studentId&companyId&supervisorId&q`. |
-| Auditoría | Toda transición y descarga sensible persiste `AuditEvent` en la misma transacción. |
+| Auditoría | Toda transición persiste `AuditEvent`; las transiciones de práctica incluyen `PracticeStatusHistory` en la misma transacción. Toda descarga autorizada se audita. |
 | Transiciones | Listadas por endpoint en la columna "Transición". |
 
 ## 2. Módulo identidad y perfil
@@ -62,20 +62,24 @@
 | Método | Ruta | Actor | Ámbito | DTO | Respuesta | Errores | Transición |
 |---|---|---|---|---|---|---|---|
 | GET | `/companies` | STUDENT; COORDINATOR | Propio/campus | `?q&ruc` | `[CompanyDto]` | 401, 403 | — (coincidencia por RUC antes de crear) |
-| POST | `/companies` | STUDENT; COORDINATOR | Propio/campus | `CreateCompanyDto { ruc?, razonSocial, representante, cargo, direccion, contacto, area, esExtranjera }` | `201` | 400, 409 (RUC duplicado), 403 | — |
-| PUT | `/companies/{id}` | Creador; COORDINATOR | Propio/campus | `UpdateCompanyDto` | `200` | 400, 403, 404, 409 | Cambios auditados (HU-10) |
+| POST | `/companies` | STUDENT; COORDINATOR | Propio/campus | `CreateCompanyDto { ruc?, razonSocial, direccion, contacto?, area?, esExtranjera }` | `201 { company }` | 400, 409 (RUC duplicado), 403 | — |
+| PUT | `/companies/{id}` | Creador; COORDINATOR | Propio/campus | `UpdateCompanyDto` | `200` | 400, 403, 404, 409 | Cambio del catálogo auditado; no muta prácticas existentes (HU-10) |
+| POST | `/companies/{id}/representatives` | STUDENT; COORDINATOR | Propio/campus | `CreateCompanyRepresentativeDto { nombre, cargo?, correo?, telefono?, otrosDatosContacto? }` | `201 { representative }` | 400, 403, 404 | Crea contacto sin cuenta de usuario |
+
+`Company` y `CompanyRepresentative` son reutilizables. Ninguna actualización de estos catálogos cambia una práctica existente ni su `representativeSnapshot`; usar otra empresa requiere `POST /practices`.
 
 ## 6. Módulo práctica (expediente)
 
 | Método | Ruta | Actor | Ámbito | DTO | Respuesta | Errores | Transición |
 |---|---|---|---|---|---|---|---|
-| POST | `/practices` | STUDENT | Propio | `CreatePracticeDto { companyId, periodId, areaCargo, responsableEmpresarial, fechaInicio, fechaFin, horario, modalidad, letterRequestId? }` | `201` (En preparación) | 400, 403, 422 (perfil incompleto) | — (HU-11) |
-| GET | `/practices/mine` | STUDENT | Propio | `?estado&periodId` | `[PracticeSummaryDto]` | 401, 403 | — |
-| GET | `/practices` | COORDINATOR | Campus | `?estado&periodId&q&supervisorId` | `[PracticeSummaryDto]` paginado | 401, 403 | — |
-| GET | `/practices/{id}` | Propietario; COORDINATOR campus; SUPERVISOR asignado; AUDITOR global | Según rol | — | `PracticeDetailDto { empresa, carta, documentos[], horas, supervisiones, evaluaciones, checklist }` | 401, 403, 404 | — |
-| PUT | `/practices/{id}` | Propietario; COORDINATOR | Propio/campus | `UpdatePracticeDto` (solo En preparación) | `200` | 400, 403, 404, 409 | — (optimistic lock por versión) |
-| POST | `/practices/{id}/authorize` | COORDINATOR | Campus | `{ Idempotency-Key }` | `200 { estado: AUTORIZADA }` | 403, 404, 409 (checklist inicio), 422 | En preparación → Autorizada |
-| POST | `/practices/{id}/activate` | COORDINATOR | Campus | `{ justificacion? }` | `200 { estado: ACTIVA }` | 403, 404, 409 | Autorizada → Activa |
+| POST | `/practices` | STUDENT | Propio | `CreatePracticeDto { companyId, companyRepresentativeId, academicPeriodId, areaCargo, fechaInicio, fechaFin, horario, modalidad, letterRequestId? }` | `201 { practice, requirements[] }` (`PREPARATION`) | 400, 403, 409, 422 (perfil incompleto) | Captura representante y requisitos iniciales activos (HU-11) |
+| GET | `/practices/mine` | STUDENT | Propio | `?estado&academicPeriodId` | `[PracticeSummaryDto]` | 401, 403 | — |
+| GET | `/practices` | COORDINATOR | CampusSchool | `?estado&academicPeriodId&q&supervisorId` | `[PracticeSummaryDto]` paginado | 401, 403 | — |
+| GET | `/practices/{id}` | Propietario; COORDINATOR mismo CampusSchool; SUPERVISOR asignado; AUDITOR global | Según rol | — | `PracticeDetailDto { empresa, representanteSnapshot, periodo, campusSchool, carta, requisitos[], horas, supervisiones, evaluaciones, checklist }` | 401, 403, 404 | — |
+| PUT | `/practices/{id}` | STUDENT propietario | Propio | `UpdatePracticeDto` (solo `PREPARATION`; excluye empresa y representante) | `200` | 400, 403, 404, 409 | — (optimistic lock por versión) |
+| GET | `/practices/{id}/requirements` | Propietario; COORDINATOR mismo CampusSchool; SUPERVISOR asignado; AUDITOR global | Según rol | — | `[PracticeRequirementDto { snapshot, document, currentVersion? }]` | 401, 403, 404 | Checklist derivado de snapshots inmutables |
+| POST | `/practices/{id}/authorize` | COORDINATOR | Mismo CampusSchool | `{ Idempotency-Key }` | `200 { estado: AUTHORIZED }` | 403, 404, 409 (requisitos iniciales), 422 | `PREPARATION` → `AUTHORIZED` |
+| POST | `/practices/{id}/activate` | COORDINATOR | Mismo CampusSchool | `{ justificacion? }` | `200 { estado: ACTIVE }` | 403, 404, 409 (revalida requisitos iniciales) | `AUTHORIZED` → `ACTIVE` |
 | POST | `/practices/{id}/suspend` | COORDINATOR | Campus | `SuspendDto { motivo, fechaEfectiva }` | `200` | 400, 403, 404, 409 | Activa → Suspendida |
 | POST | `/practices/{id}/reactivate` | COORDINATOR | Campus | `ReactivateDto { motivo }` | `200` | 400, 403, 404, 409 | Suspendida → Activa |
 | POST | `/practices/{id}/cancel` | COORDINATOR | Campus | `CancelDto { motivo, fechaEfectiva }` | `200` | 400, 403, 404, 409 | → Cancelada (conserva historial) |
@@ -89,18 +93,21 @@
 
 ## 7. Módulo documentos
 
+`DocumentRequirementDefinition` reemplaza `DocumentType`. Sus versiones enteras declaran `code`, `name`, `evidenceKind` (`PDF`/`DIGITAL_RECORD`), `stage` (`INITIAL`/`CLOSING`), `mandatory` y `active`. Al crear una práctica se copian las definiciones `INITIAL` activas a `PracticeRequirementSnapshot`; el catálogo posterior no altera el expediente y existe exactamente un `Document` por snapshot.
+
 | Método | Ruta | Actor | Ámbito | DTO | Respuesta | Errores | Transición |
 |---|---|---|---|---|---|---|---|
-| GET | `/practices/{id}/documents` | Propietario; COORDINATOR; SUPERVISOR asignado; AUDITOR | Según rol | `?tipo` | `[DocumentDto { versiones[], vigente }]` | 401, 403, 404 | — |
-| POST | `/practices/{id}/documents` | STUDENT (o SUPERVISOR con evidencia propia) | Propio/asignado | `multipart: { tipo, file, metadatos? }` | `201 { documento, version: n }` (Pendiente) | 400, 413, 422 (validación técnica), 403, 404, 409 | Crea documento o nueva versión si Pendiente/Observado (HU-14) |
-| POST | `/documents/{documentId}/submit` | Propietario | Propio | `{ Idempotency-Key }` | `200 { estado: EN_REVISION }` | 403, 404, 409 | Pendiente/Observado → En revisión |
+| GET | `/practices/{id}/documents` | Propietario; COORDINATOR; SUPERVISOR asignado; AUDITOR | Según rol | — | `[DocumentDto { requirementSnapshot, versiones[], currentVersion }]` | 401, 403, 404 | — |
+| POST | `/practices/{id}/documents` | STUDENT | Propio | `multipart: { requirementSnapshotId, file }` | `201 { document, version }` (`PENDING`) | 400, 413, 422 (validación técnica), 403, 404, 409 | Para snapshot `PDF`; carga/reemplazo crea nueva versión |
+| POST | `/practices/{id}/documents/digital` | STUDENT | Propio | JSON `{ requirementSnapshotId, metadata }` | `201 { document, version }` (`PENDING`) | 400, 403, 404, 409, 422 | Para snapshot `DIGITAL_RECORD`; creación/reemplazo crea nueva versión |
+| POST | `/documents/{documentId}/submit` | Propietario | Propio | `{ Idempotency-Key }` | `200 { estado: UNDER_REVIEW, versionId }` | 403, 404, 409 | `PENDING` → `UNDER_REVIEW` sobre la misma versión actual |
 | GET | `/documents/{documentId}/versions` | Autorizado por ámbito | Según rol | — | `[DocumentVersionDto]` | 401, 403, 404 | — |
-| POST | `/coordinator/documents/{documentId}/approve` | COORDINATOR | Campus | `{ Idempotency-Key }` | `200` | 403, 404, 409 | En revisión → Aprobado (inmutable) |
-| POST | `/coordinator/documents/{documentId}/observe` | COORDINATOR | Campus | `ObserveDto { comentario }` | `200` | 400, 403, 404, 409 | En revisión → Observado (ligado a la versión) |
-| POST | `/coordinator/documents/{documentId}/annul` | COORDINATOR | Campus | `AnnulDto { motivo }` | `200` | 400, 403, 404, 409 | En revisión → Anulado |
-| GET | `/documents/versions/{versionId}/download` | Autorizado por ámbito | Según rol | — | `application/pdf` (temporal) | 401, 403, 404 | Descarga auditada |
+| POST | `/coordinator/documents/{documentId}/approve` | COORDINATOR | Mismo CampusSchool | `{ Idempotency-Key }` | `200` | 403, 404, 409 | Versión actual exacta `UNDER_REVIEW` → `APPROVED` (documento y versión inmutables) |
+| POST | `/coordinator/documents/{documentId}/observe` | COORDINATOR | Mismo CampusSchool | `ObserveDto { comentario }` | `200` | 400, 403, 404, 409 | Versión actual exacta `UNDER_REVIEW` → `OBSERVED` |
+| POST | `/coordinator/documents/{documentId}/annul` | COORDINATOR | Mismo CampusSchool | `AnnulDto { motivo }` | `200` | 400, 403, 404, 409 | Versión actual exacta `UNDER_REVIEW` → `ANNULLED` |
+| GET | `/documents/versions/{versionId}/download` | Autorizado por ámbito | Según rol | — | `application/pdf` desde almacenamiento privado | 401, 403, 404, 409 (sin `FileAsset`) | Descarga autorizada y auditada |
 
-Nota: la carta usa su propio flujo (módulo 4); los tipos documentales se rigen por `DocumentType` (carga inicial: carta de aceptación, convenio, plan de trabajo, informe final, constancia/certificado, evaluación de empresa, reconocimiento).
+La carga inicial de definiciones obligatorias es: carta de aceptación (`PDF`), convenio PPP (`PDF`), plan de trabajo (`PDF`) e información de empresa (`DIGITAL_RECORD`), todas `INITIAL`. Un reemplazo solo se permite desde `PENDING` u `OBSERVED`; desde `OBSERVED` crea otra versión `PENDING`, que luego debe enviarse. No existen endpoints de borrado. Para PDF se valida únicamente extensión `.pdf`, MIME `application/pdf`, bytes mágicos `%PDF`, archivo no vacío y máximo configurable; no se realiza OCR ni validación de firma o semántica. `FileAsset` guarda `storageKey`, `sha256`, MIME, tamaño, nombre original y metadata, nunca bytes. La carta generada usa su flujo propio (módulo 4).
 
 ## 8. Módulo horas
 
@@ -144,7 +151,7 @@ Nota: la carta usa su propio flujo (módulo 4); los tipos documentales se rigen 
 
 | Método | Ruta | Actor | Ámbito | DTO | Respuesta | Errores | Transición |
 |---|---|---|---|---|---|---|---|
-| POST | `/practices/{id}/documents` (tipo INFORME_FINAL / CONSTANCIA_CERTIFICADO) | STUDENT | Propio | `multipart` (ver módulo 7) | `201` (Pendiente) | 400, 413, 422, 403, 404, 409 | — (HU-32, HU-33) |
+| POST | `/practices/{id}/documents` (snapshot `CLOSING` con evidencia PDF) | STUDENT | Propio | `multipart` (ver módulo 7) | `201` (`PENDING`) | 400, 413, 422, 403, 404, 409 | — (HU-32, HU-33; planificado) |
 | GET | `/practices/{id}/closing-checklist` | Propietario; COORDINATOR; SUPERVISOR asignado; AUDITOR | Según rol | — | `ClosingChecklistDto { documentoCierre, supervisiones, evaluaciones, horasDeclaradasVsValidadas, bloqueos[] }` | 401, 403, 404 | — (HU-34, sin mutación) |
 | POST | `/recognitions` | COORDINATOR | Campus | `CreateRecognitionDto { studentProfileId, tipo, numero, fecha, file }` | `201` (Registrado) | 400, 403, 404, 409 (requisito no Cumplido), 422 | Cumplido → Reconocido (HU-37) |
 | GET | `/recognitions/{studentId}` | COORDINATOR; AUDITOR; propio estudiante | Según rol | — | `RecognitionDto` | 401, 403, 404 | — |
@@ -202,7 +209,7 @@ Authorization: Bearer <token>
 | Máquina | Endpoints que transicionan |
 |---|---|
 | Solicitud de carta | `/letters/{id}/submit`, `/resubmit`, `/secretary/letters/{id}/approve`, `/observe`, `/annul` |
-| Documento | `/practices/{id}/documents` (crea), `/documents/{id}/submit`, `/coordinator/documents/{id}/approve`, `/observe`, `/annul` |
+| Documento | `/practices/{id}/documents`, `/practices/{id}/documents/digital` (crean versión), `/documents/{id}/submit`, `/coordinator/documents/{id}/approve`, `/observe`, `/annul` |
 | Horas | `/practices/{id}/hours` (crea), `/hours/{id}/submit`, `/resubmit`, `/coordinator/hours/{id}/validate`, `/observe` |
 | Supervisión | `/practices/{id}/supervisions` (crea), `/supervisions/{id}/reschedule`, `/complete`, `/annul` |
 | Evaluación | `/practices/{id}/evaluations` (crea), `/evaluations/{id}/finalize`, `/reopen` |

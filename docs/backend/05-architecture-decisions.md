@@ -13,6 +13,7 @@
 | ADR-005 | Generación de PDF | Aceptada |
 | ADR-006 | Auditoría inmutable | Aceptada |
 | ADR-007 | Aislamiento por campus y escuela | Aceptada |
+| ADR-008 | Requisitos congelados y evidencia versionada | Aceptada |
 
 ---
 
@@ -38,7 +39,7 @@
 
 **Estado:** Aceptada.
 
-**Contexto.** Se requiere un solo modelo relacional con integridad fuerte: cardinalidades, unicidad (RUC, correo, versión vigente por práctica+tipo), transacciones atómicas entre estados y auditoría, y consultas agregadas para dashboards. Los requisitos (RNF-04, RNF-08) exigen versionado, inmutabilidad y configuración por datos.
+**Contexto.** Se requiere un solo modelo relacional con integridad fuerte: cardinalidades, unicidad (RUC, correo, un documento por snapshot), transacciones atómicas entre estados e historiales, y consultas agregadas para dashboards. Los requisitos (RNF-04, RNF-08) exigen versionado, inmutabilidad y configuración por datos.
 
 **Decisión.** PostgreSQL como única base de datos (una instancia para los tres campus; el aislamiento es lógico, DEC-01). Prisma como capa de acceso a datos: esquema declarativo, migraciones versionadas, tipado estricto y transacciones interactivas para acciones compuestas (aprobar carta = estado + PDF + auditoría).
 
@@ -73,9 +74,9 @@
 
 **Estado:** Aceptada.
 
-**Contexto.** Los expedientes contienen PDF sensibles (convenios firmados, informes, resoluciones). RNF-03 exige: sin URLs públicas permanentes, entregas con autorización temporal, descargas sensibles auditadas y validación técnica previa (MIME/tamaño/estructura). La infraestructura de almacenamiento final es pendiente (DEC-08).
+**Contexto.** Los expedientes contienen PDF sensibles (convenios firmados, informes, resoluciones). RNF-03 exige: sin URLs públicas permanentes, entregas autorizadas, descargas auditadas y validación técnica previa. La infraestructura de almacenamiento final es pendiente (DEC-08).
 
-**Decisión.** Los archivos se almacenan **fuera de PostgreSQL** mediante un adaptador `FileStorage` reemplazable (sistema de archivos local en dev; objeto storage en producción). En la base solo viven metadatos (`FileMeta`: uuid interno, nombre original, mime, tamaño, hash, ruta interna). La entrega es por endpoint autenticado con autorización por ámbito (matriz 02) y autorización temporal firmada; cada descarga sensible genera `AuditEvent`. La validación técnica (PDF legible, tamaño configurable, MIME real) ocurre antes de persistir.
+**Decisión.** Los archivos se almacenan **fuera de PostgreSQL** mediante un adaptador `FileStorage` reemplazable (sistema de archivos local en dev; objeto storage en producción). En la base solo vive `FileAsset` con `storageKey`, `sha256`, MIME, tamaño, nombre original y metadata; nunca bytes. Cada descarga pasa por un endpoint autenticado y autorizado; las versiones documentales usan `GET /documents/versions/{versionId}/download` y generan `AuditEvent`. Para PDF la validación es exclusivamente técnica: extensión `.pdf`, MIME `application/pdf`, magic bytes `%PDF`, contenido no vacío y máximo configurable. No realiza OCR ni valida firma o semántica.
 
 **Consecuencias.**
 - (+) Cumple RNF-03 y RNF-04 (aprobados nunca se sobrescriben ni eliminan físicamente).
@@ -109,7 +110,7 @@
 
 **Contexto.** HU-44 exige bitácora "que no puede modificarse desde la aplicación"; RNF-04 exige trazabilidad transaccional; los coordinadores consultan su campus y el auditor los tres. La integridad debe resistir incluso a acceso administrativo erróneo.
 
-**Decisión.** Tabla `AuditEvent` **append-only** sin operaciones de update/delete disponibles (Prisma sin permisos de borrado; FK restrictivas hacia actores; sin endpoint de mutación). Cada evento registra actor, rol, campus, acción, entidad, identificador, resultado y detalle JSON; se escribe **en la misma transacción** que la acción crítica (I-15). Opcionalmente se encadenan hashes (SHA-256 del evento previo) para detectar alteraciones externas; la verificación es una tarea de auditoría fuera de la app.
+**Decisión.** Tabla `AuditEvent` **append-only** sin operaciones de update/delete disponibles (Prisma sin permisos de borrado; FK restrictivas hacia actores; sin endpoint de mutación). Cada evento registra actor, rol, campus, acción, entidad, identificador, resultado y detalle JSON; se escribe **en la misma transacción** que la acción crítica (I-15). `PracticeStatusHistory` también es append-only y cada transición de práctica escribe historial, auditoría y nuevo estado atómicamente. Opcionalmente se encadenan hashes (SHA-256 del evento previo) para detectar alteraciones externas; la verificación es una tarea de auditoría fuera de la app.
 
 **Consecuencias.**
 - (+) Trazabilidad íntegra y consultable por ámbito (coordinador campus, auditor global, admin global).
@@ -125,13 +126,31 @@
 
 **Contexto.** DEC-01 establece tres campus con datos segregados y auditoría consolidada; RN-10 limita a Secretaría/Coordinador por campus; la escuela está preparada para otras facultades sin activarse. El error típico es filtrar solo por rol y olvidar el ámbito organizacional.
 
-**Decisión.** El ámbito es **parte estructural del modelo**: `UserRole.campusId`, `StudentProfile.{campusId, schoolId}`, `Practice.{campusId, schoolId}`. Toda consulta y comando resuelve el ámbito del recurso y lo contrasta con el del actor mediante un **servicio de ámbito central** (único punto de cálculo), aplicado en el guard (negación rápida) y revalidado en el servicio (defensa en profundidad). La escuela activa se valida contra `SchoolCampus.activo`. El auditor usa un permiso especial `TRES_CAMPUS` solo-lectura; el `SYSTEM_ADMIN` gestiona estructura sin heredar operaciones.
+**Decisión.** El ámbito es **parte estructural del modelo**: la asignación de rol y `StudentProfile` resuelven campus y escuela, y `Practice` pertenece directamente a `CampusSchool`. Toda consulta y comando contrasta el ámbito del recurso con el del actor mediante un **servicio de ámbito central** (único punto de cálculo), aplicado en el guard (negación rápida) y revalidado en el servicio (defensa en profundidad). La oferta activa se valida contra `CampusSchool.active`. El auditor usa un permiso especial `TRES_CAMPUS` solo-lectura; el `SYSTEM_ADMIN` gestiona estructura sin heredar operaciones.
 
 **Consecuencias.**
 - (+) Cumple RNF-02 (accesos cruzados → 403) y los criterios 1 y 6 del MVP.
-- (+) Activar otra escuela es una operación de datos (`SchoolCampus.activo`), no de código.
+- (+) Activar otra escuela es una operación de datos (`CampusSchool.active`), no de código.
 - (−) Cada nueva consulta agregada debe declarar su ámbito; se aplica revisión de pares con checklist de ámbito en CI.
 - (−) El sistema tolera "campus" mal asignados en datos de prueba; los seeds deben respetar el mismo servicio de ámbito.
+
+---
+
+## ADR-008 — Requisitos congelados y evidencia versionada
+
+**Estado:** Aceptada.
+
+**Contexto.** Los requisitos cambian con el tiempo, pero una práctica debe conservar el checklist con el que fue creada. Además, una evidencia puede ser archivo PDF o información digital estructurada, y las observaciones deben quedar ligadas a la versión revisada.
+
+**Decisión.** `DocumentRequirementDefinition` reemplaza `DocumentType` y se versiona por entero con `code`, `name`, `evidenceKind`, `stage`, `mandatory` y `active`. Al crear una práctica, las definiciones `INITIAL` activas se copian a `PracticeRequirementSnapshot` inmutables; el checklist se deriva de ellas. Cada snapshot tiene exactamente un `Document`. Una carga o reemplazo crea una nueva `DocumentVersion` `PENDING` y actualiza el estado actual del documento; `submit` mueve esa misma versión a `UNDER_REVIEW`. Aprobar, observar o anular revisa la versión actual exacta. Una observada solo se corrige con otra versión `PENDING`; documento y versión aprobados son inmutables y no tienen ruta de borrado.
+
+`Company` y `CompanyRepresentative` son catálogos reutilizables, pero `Practice` conserva sus referencias y un `representativeSnapshot` JSON tomado al crear. Ningún cambio del catálogo muta prácticas existentes y cambiar de empresa crea otra práctica.
+
+**Consecuencias.**
+- (+) Versionar o desactivar definiciones no altera expedientes históricos.
+- (+) PDF y registros digitales comparten revisión y trazabilidad sin inventar archivos para datos estructurados.
+- (+) La autorización de la práctica se calcula de forma reproducible sobre snapshots iniciales obligatorios aprobados.
+- (−) Crear una práctica requiere copiar definiciones y crear sus documentos 1:1 dentro de una transacción.
 
 ---
 

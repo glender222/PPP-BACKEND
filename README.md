@@ -4,7 +4,7 @@ Backend del Sistema de Practicas Preprofesionales (PPP) de la Universidad Peruan
 
 ## Estado actual
 
-Implementado y cubierto por pruebas:
+Implementado y cubierto por pruebas en las fases base:
 
 - Fundamentos: NestJS, TypeScript strict, PostgreSQL, Prisma, migraciones y seed idempotente.
 - Identidad de desarrollo, sesiones JWT y perfiles de estudiante.
@@ -13,18 +13,101 @@ Implementado y cubierto por pruebas:
 - Carta de presentacion: borrador, vista previa PDF, envio, observacion, correccion, reenvio, aprobacion, descarga privada, historial, notificaciones y auditoria.
 - Generacion de PDF desde plantilla versionada con logo, firma y sello institucionales. Los datos de destinatario, empresa, area, estudiante, codigo y ciclo se rellenan desde datos del sistema.
 
-Pendiente de implementacion: los modulos de empresa, expediente de practica, documentos, horas, supervisiones, evaluaciones, cierre, reconocimiento, dashboards, reportes e importacion. El alcance y el plan por fases estan en [`docs/backend/06-implementation-plan.md`](docs/backend/06-implementation-plan.md).
+La entrega actual incorpora un subconjunto de las fases 2 y 3 con cobertura unitaria y e2e para sus reglas críticas:
+
+- Empresas reutilizables y representantes como contactos sin cuenta: `GET/POST /companies` y `POST /companies/{id}/representatives`.
+- Practicas propias en `PREPARATION`, ligadas a estudiante, empresa, representante, periodo academico y campus-escuela, con snapshot del representante: `POST /practices`, `GET /practices/mine`, `GET/PUT /practices/{id}`.
+- Requisitos iniciales congelados al crear la practica y checklist derivado: `GET /practices/{id}/requirements`.
+- Evidencia PDF o registro digital versionado: `POST /practices/{id}/documents`, `POST /practices/{id}/documents/digital`, `POST /documents/{id}/submit`, `GET /documents/{id}/versions` y acciones `approve`/`observe`/`annul` del coordinador por documento.
+- Autorizacion y activacion por coordinador del mismo campus-escuela: `POST /practices/{id}/authorize` y `POST /practices/{id}/activate`.
+- Descarga privada y auditada de versiones PDF: `GET /documents/versions/{versionId}/download`.
+
+Permanecen planificados los estados posteriores de la practica y los modulos de horas, supervisiones, evaluaciones, cierre, reconocimiento, dashboards, reportes e importacion. El alcance y el plan por fases estan en [`docs/backend/06-implementation-plan.md`](docs/backend/06-implementation-plan.md).
+
+## Avance por etapas
+
+### Base completada hasta carta de presentacion
+
+Antes del avance actual ya estaban terminados:
+
+- Inicio de sesion de desarrollo con JWT, usuarios, roles y perfiles.
+- Aislamiento por campus, escuela, propietario y rol.
+- Catalogos institucionales, periodos academicos y auditoria.
+- Flujo completo de carta: crear borrador, previsualizar PDF, enviar, observar, corregir, reenviar, aprobar y descargar.
+- Plantilla versionada con logo, firma, sello, numeracion reemplazable y almacenamiento privado local.
+
+### Implementado despues de la carta
+
+#### 1. Empresas y representantes
+
+- `Company` es reutilizable y puede buscarse por RUC o nombre.
+- `CompanyRepresentative` registra contactos empresariales sin crear cuentas de usuario.
+- Una empresa puede tener varios representantes.
+- Actualizar una empresa o representante no modifica las practicas existentes.
+- Cambiar de empresa significa crear otra `Practice`; la anterior nunca se sobrescribe.
+
+#### 2. Practicas
+
+- Cada `Practice` pertenece a un estudiante, empresa, representante, periodo y `CampusSchool` activo.
+- Al crearla se guarda un snapshot JSON del representante para conservar el dato historico.
+- Un estudiante puede tener varias practicas independientes.
+- La practica empieza en `PREPARATION` y usa version para actualizaciones con control optimista.
+- `PracticeStatusHistory` y `AuditEvent` registran la creacion y cada transicion de forma atomica.
+- Actualmente estan operativas las transiciones `PREPARATION -> AUTHORIZED -> ACTIVE`.
+
+#### 3. Requisitos iniciales
+
+Al crear una practica se congelan definiciones vigentes en `PracticeRequirementSnapshot`. Los cuatro requisitos iniciales obligatorios sembrados son:
+
+| Codigo | Evidencia |
+|---|---|
+| `ACCEPTANCE_LETTER` | Carta de aceptacion en PDF |
+| `PPP_AGREEMENT` | Convenio de PPP en PDF |
+| `WORK_PLAN` | Plan de trabajo en PDF |
+| `COMPANY_INFORMATION` | Informacion de empresa como registro digital |
+
+Cada snapshot tiene un solo `Document`. Cambiar posteriormente el catalogo `DocumentRequirementDefinition` no altera los requisitos de una practica creada.
+
+#### 4. Gestion documental
+
+- Cada carga o reemplazo crea una nueva `DocumentVersion`.
+- Flujo soportado: `PENDING -> UNDER_REVIEW -> OBSERVED | APPROVED | ANNULLED`.
+- Un documento observado se corrige cargando una nueva version `PENDING` y enviandola nuevamente.
+- `DocumentReview` siempre referencia la version exacta revisada.
+- Un documento aprobado no puede reemplazarse ni eliminarse fisicamente.
+- Los registros digitales usan metadata JSON y no crean archivos ficticios.
+
+#### 5. Archivos y seguridad
+
+- `StoragePort` define un contrato de objetos por `key`, compatible con un futuro adaptador S3 u otro object storage.
+- Desarrollo usa `LocalStorageAdapter` y guarda los bytes en `data/uploads/`.
+- PostgreSQL conserva `FileAsset`: `storageKey`, SHA-256, MIME, tamano, nombre original y metadata.
+- Todo PDF se valida por extension, MIME, cabecera `%PDF`, contenido no vacio y `MAX_PDF_SIZE_BYTES`.
+- Las descargas pasan por autenticacion, autorizacion por recurso y auditoria.
+- No se realiza OCR, validacion automatica de firmas ni validacion semantica del contenido.
+
+#### 6. Autorizacion de la practica
+
+El coordinador del mismo `CampusSchool` solo puede autorizar y activar cuando todos los requisitos iniciales obligatorios estan en `APPROVED`. Intentar una transicion antes de completar el checklist devuelve `409 Conflict` con detalle accionable.
+
+### Frontera actual
+
+El backend llega hasta una practica `ACTIVE` con sus requisitos iniciales aprobados. Todavia no estan implementados los comandos posteriores de suspension, reactivacion, cancelacion, cierre y reapertura, ni horas, asignacion de supervisor, supervisiones, evaluaciones, reconocimiento, dashboards o reportes.
 
 ## Arquitectura y escalabilidad
 
 El proyecto es un monolito modular NestJS. Se organiza por capacidades de negocio, no por pantallas ni roles, para mantener consistencia transaccional mientras el producto evoluciona.
 
-- **Modulos de dominio:** Identity, Catalog, Letter, Audit y los modulos futuros definidos en el plan.
+- **Modulos de dominio:** Identity, Catalog, Letter, Company, Practice, Document, Audit y los modulos futuros definidos en el plan.
 - **Aislamiento multicanal:** PostgreSQL unico con limites logicos por campus y escuela; el servicio de alcance se aplica en guards y se revalida en los servicios de dominio.
 - **Integridad:** Prisma, migraciones versionadas y transacciones para mutaciones criticas, como aprobar una carta, crear su PDF y registrar auditoria.
 - **Extensibilidad:** puertos reemplazables para autenticacion, almacenamiento de archivos, generacion de cartas y numeracion. En produccion se pueden conectar un proveedor institucional de identidad y almacenamiento de objetos sin alterar el dominio.
 - **Configuracion por datos:** plantillas, parametros operativos, campus, escuelas y roles se mantienen como datos versionados o catalogos, no como constantes de negocio.
-- **Trazabilidad:** `AuditEvent` es append-only; las descargas y transiciones relevantes se auditan.
+- **Trazabilidad:** `AuditEvent` y `PracticeStatusHistory` son append-only; las transiciones de practica los escriben atomicamente y todas las descargas se auditan.
+
+Los requisitos documentales se definen con versiones enteras y se copian a snapshots inmutables al crear cada practica. Existe un documento por snapshot; reemplazar evidencia crea una version `PENDING`, enviarla mueve esa misma version a `UNDER_REVIEW`, y la revision siempre apunta a la version actual exacta. Los aprobados son inmutables y no existe ruta de borrado.
+
+Los bytes de los PDF permanecen fuera de PostgreSQL. `FileAsset` conserva solo `storageKey`, SHA-256, MIME, tamano, nombre original y metadata. La validacion PDF es exclusivamente tecnica: extension `.pdf`, MIME `application/pdf`, magic bytes `%PDF`, archivo no vacio y maximo configurable; no realiza OCR ni valida firmas o contenido.
 
 El adaptador de autenticacion y el almacenamiento de archivos actuales son solo de desarrollo. La numeracion institucional y la plantilla oficial vigente permanecen configuraciones pendientes antes de produccion.
 
@@ -96,9 +179,31 @@ La contrasena de desarrollo por defecto es `PppDev!2026`; se configura mediante 
 4. Observe con `POST /secretary/letters/{id}/observe` o apruebe con `POST /secretary/letters/{id}/approve`.
 5. Una aprobacion genera el PDF final. El estudiante autorizado puede descargarlo mediante `GET /letters/{id}/download`.
 
+### Flujo posterior: empresa, practica y documentos
+
+1. Como estudiante, cree la empresa con `POST /companies`; puede incluir un representante inicial.
+2. Si necesita otro contacto, use `POST /companies/{id}/representatives`.
+3. Cree la practica con `POST /practices`, usando empresa, representante y periodo academico.
+4. Consulte los snapshots creados con `GET /practices/{id}/requirements`.
+5. Para cada requisito PDF, use `POST /practices/{id}/documents` como `multipart/form-data` con `requirementSnapshotId` y `file`.
+6. Para informacion de empresa, use `POST /practices/{id}/documents/digital` con `requirementSnapshotId` y `metadata`.
+7. Envie cada documento con `POST /documents/{documentId}/submit`.
+8. Como coordinador del mismo campus-escuela, apruebe u observe desde los endpoints de `/coordinator/documents/{documentId}`.
+9. Si queda observado, el estudiante carga otra version y la vuelve a enviar.
+10. Cuando los cuatro requisitos esten aprobados, use `POST /practices/{id}/authorize` y luego `POST /practices/{id}/activate`.
+
+Los endpoints anteriores aparecen agrupados como **Companies**, **Practices** y **Documents** en Scalar.
+
 El detalle de rutas, DTOs, codigos de error y autorizacion esta en [`docs/backend/04-api-contract.md`](docs/backend/04-api-contract.md).
 
 ## Verificacion
+
+Estado de la ultima verificacion completa:
+
+- 34 pruebas unitarias aprobadas.
+- 24 pruebas e2e aprobadas.
+- Lint y build aprobados.
+- Cinco migraciones aplicadas y schema sincronizado.
 
 ```bash
 corepack pnpm lint

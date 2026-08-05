@@ -1,10 +1,5 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
-import {
-  LetterRequestStatus,
-  LetterReviewDecisionType,
-  Prisma,
-  Role,
-} from '@prisma/client';
+import { LetterRequestStatus, LetterReviewDecisionType, Prisma, Role } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import type { AuthUser } from '../../common/authorization/auth-user';
 import { type Permission } from '../../common/authorization/permissions';
@@ -62,7 +57,12 @@ export interface LetterView {
     version: number;
     contenido: unknown;
     createdAt: Date;
-    decisiones: { id: string; decision: LetterReviewDecisionType; comment: string | null; createdAt: Date }[];
+    decisiones: {
+      id: string;
+      decision: LetterReviewDecisionType;
+      comment: string | null;
+      createdAt: Date;
+    }[];
   }[];
   historial: {
     id: string;
@@ -104,7 +104,10 @@ export class LetterService {
       orderBy: { version: 'desc' },
     });
     if (templateVersion === null) {
-      throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, 'No existe una plantilla vigente para tu campus y escuela');
+      throw new BusinessException(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        'No existe una plantilla vigente para tu campus y escuela',
+      );
     }
 
     const id = await this.prisma.$transaction(async (tx) => {
@@ -122,13 +125,23 @@ export class LetterService {
         },
       });
       await tx.letterStateHistory.create({
-        data: { letterRequestId: letter.id, toStatus: LetterRequestStatus.DRAFT, actorId: actor.id },
+        data: {
+          letterRequestId: letter.id,
+          toStatus: LetterRequestStatus.DRAFT,
+          actorId: actor.id,
+        },
       });
       await this.audit.recordAudit(
         this.auditEntry(actor, student.campusId, 'LETTER_CREATED', letter.id),
         tx,
       );
-      await this.notify(tx, [actor.id], 'LETTER_DRAFT_CREATED', 'Se creo el borrador de tu carta.', letter.id);
+      await this.notify(
+        tx,
+        [actor.id],
+        'LETTER_DRAFT_CREATED',
+        'Se creo el borrador de tu carta.',
+        letter.id,
+      );
       return letter.id;
     });
     return this.getDetail(actor, id);
@@ -152,7 +165,9 @@ export class LetterService {
     this.scopePolicy.assertPermission(actor, 'letter:review');
     const scopes = actor.roles.filter(
       (assignment) =>
-        assignment.role === Role.SECRETARY && assignment.campusId !== null && assignment.schoolId !== null,
+        assignment.role === Role.SECRETARY &&
+        assignment.campusId !== null &&
+        assignment.schoolId !== null,
     );
     const letters = await this.prisma.letterRequest.findMany({
       where: {
@@ -202,7 +217,10 @@ export class LetterService {
             : { templateData: dto.datosPlantilla as Prisma.InputJsonValue }),
         },
       });
-      await this.audit.recordAudit(this.auditEntry(actor, letter.campusId, 'LETTER_UPDATED', id), tx);
+      await this.audit.recordAudit(
+        this.auditEntry(actor, letter.campusId, 'LETTER_UPDATED', id),
+        tx,
+      );
     });
     return this.getDetail(actor, id);
   }
@@ -215,7 +233,10 @@ export class LetterService {
     }
     this.requireStatus(letter.status, [LetterRequestStatus.DRAFT]);
     if (!letter.studentProfile.complete) {
-      throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, 'Debes completar tu perfil antes de enviar la carta');
+      throw new BusinessException(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        'Debes completar tu perfil antes de enviar la carta',
+      );
     }
     this.assertComplete(this.toSnapshot(letter));
     const recipients = await this.secretaryIds(letter.campusId, letter.schoolId);
@@ -279,7 +300,10 @@ export class LetterService {
   async observe(actor: AuthUser, id: string, comment: string): Promise<LetterView> {
     const letter = await this.getLetter(id);
     this.assertAccess(actor, 'letter:review', letter);
-    this.requireStatus(letter.status, [LetterRequestStatus.SUBMITTED, LetterRequestStatus.RESUBMITTED]);
+    this.requireStatus(letter.status, [
+      LetterRequestStatus.SUBMITTED,
+      LetterRequestStatus.RESUBMITTED,
+    ]);
     await this.review(
       actor,
       letter,
@@ -293,7 +317,10 @@ export class LetterService {
   async annul(actor: AuthUser, id: string, reason: string): Promise<LetterView> {
     const letter = await this.getLetter(id);
     this.assertAccess(actor, 'letter:review', letter);
-    this.requireStatus(letter.status, [LetterRequestStatus.SUBMITTED, LetterRequestStatus.RESUBMITTED]);
+    this.requireStatus(letter.status, [
+      LetterRequestStatus.SUBMITTED,
+      LetterRequestStatus.RESUBMITTED,
+    ]);
     await this.review(
       actor,
       letter,
@@ -310,10 +337,16 @@ export class LetterService {
     if (letter.status === LetterRequestStatus.APPROVED) {
       return this.toView(letter);
     }
-    this.requireStatus(letter.status, [LetterRequestStatus.SUBMITTED, LetterRequestStatus.RESUBMITTED]);
+    this.requireStatus(letter.status, [
+      LetterRequestStatus.SUBMITTED,
+      LetterRequestStatus.RESUBMITTED,
+    ]);
     const revision = letter.revisions.at(-1);
     if (revision === undefined) {
-      throw new BusinessException(HttpStatus.CONFLICT, 'La carta enviada no tiene una revision para aprobar');
+      throw new BusinessException(
+        HttpStatus.CONFLICT,
+        'La carta enviada no tiene una revision para aprobar',
+      );
     }
     const snapshot = revision.content as unknown as LetterSnapshot;
     const number = await this.numbering.nextNumber(letter.id);
@@ -329,7 +362,10 @@ export class LetterService {
     const sha256 = createHash('sha256').update(generated.content).digest('hex');
     await this.prisma.$transaction(async (tx) => {
       const current = await tx.letterRequest.findUniqueOrThrow({ where: { id } });
-      this.requireStatus(current.status, [LetterRequestStatus.SUBMITTED, LetterRequestStatus.RESUBMITTED]);
+      this.requireStatus(current.status, [
+        LetterRequestStatus.SUBMITTED,
+        LetterRequestStatus.RESUBMITTED,
+      ]);
       await tx.letterRequest.update({
         where: { id },
         data: { status: LetterRequestStatus.APPROVED, number },
@@ -355,8 +391,20 @@ export class LetterService {
           decision: LetterReviewDecisionType.APPROVED,
         },
       });
-      await this.recordTransition(tx, actor, letter, LetterRequestStatus.APPROVED, 'LETTER_APPROVED');
-      await this.notify(tx, [letter.studentProfile.userId], 'LETTER_APPROVED', 'Tu carta fue aprobada y esta disponible para descarga.', id);
+      await this.recordTransition(
+        tx,
+        actor,
+        letter,
+        LetterRequestStatus.APPROVED,
+        'LETTER_APPROVED',
+      );
+      await this.notify(
+        tx,
+        [letter.studentProfile.userId],
+        'LETTER_APPROVED',
+        'Tu carta fue aprobada y esta disponible para descarga.',
+        id,
+      );
     });
     return this.getDetail(actor, id);
   }
@@ -377,13 +425,20 @@ export class LetterService {
     const letter = await this.getLetter(id);
     this.assertAccess(actor, 'letter:download', letter);
     if (letter.status !== LetterRequestStatus.APPROVED || letter.generatedFile === null) {
-      throw new BusinessException(HttpStatus.CONFLICT, 'Solo una carta aprobada puede descargarse como documento final', {
-        allowedTransitions: ['approve'],
-      });
+      throw new BusinessException(
+        HttpStatus.CONFLICT,
+        'Solo una carta aprobada puede descargarse como documento final',
+        {
+          allowedTransitions: ['approve'],
+        },
+      );
     }
     const content = await this.storage.read(letter.generatedFile.storagePath);
     await this.prisma.$transaction(async (tx) => {
-      await this.audit.recordAudit(this.auditEntry(actor, letter.campusId, 'LETTER_DOWNLOADED', id), tx);
+      await this.audit.recordAudit(
+        this.auditEntry(actor, letter.campusId, 'LETTER_DOWNLOADED', id),
+        tx,
+      );
     });
     return content;
   }
@@ -397,12 +452,21 @@ export class LetterService {
   ): Promise<void> {
     const revision = letter.revisions.at(-1);
     if (revision === undefined) {
-      throw new BusinessException(HttpStatus.CONFLICT, 'La carta enviada no tiene una revision para revisar');
+      throw new BusinessException(
+        HttpStatus.CONFLICT,
+        'La carta enviada no tiene una revision para revisar',
+      );
     }
     await this.prisma.$transaction(async (tx) => {
       await tx.letterRequest.update({ where: { id: letter.id }, data: { status } });
       await tx.letterReviewDecision.create({
-        data: { letterRequestId: letter.id, revisionId: revision.id, reviewerId: actor.id, decision, comment },
+        data: {
+          letterRequestId: letter.id,
+          revisionId: revision.id,
+          reviewerId: actor.id,
+          decision,
+          comment,
+        },
       });
       await this.recordTransition(
         tx,
@@ -435,7 +499,9 @@ export class LetterService {
     notification: string,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
-      const revision = await tx.letterRequestRevision.count({ where: { letterRequestId: letter.id } });
+      const revision = await tx.letterRequestRevision.count({
+        where: { letterRequestId: letter.id },
+      });
       await tx.letterRequest.update({ where: { id: letter.id }, data: { status } });
       await tx.letterRequestRevision.create({
         data: {
@@ -466,7 +532,10 @@ export class LetterService {
         comment,
       },
     });
-    await this.audit.recordAudit(this.auditEntry(actor, letter.campusId, action, letter.id, comment), tx);
+    await this.audit.recordAudit(
+      this.auditEntry(actor, letter.campusId, action, letter.id, comment),
+      tx,
+    );
   }
 
   private async notify(
@@ -481,7 +550,12 @@ export class LetterService {
       return;
     }
     await tx.notification.createMany({
-      data: uniqueUserIds.map((userId) => ({ userId, type, message, link: `/letters/${letterId}` })),
+      data: uniqueUserIds.map((userId) => ({
+        userId,
+        type,
+        message,
+        link: `/letters/${letterId}`,
+      })),
     });
   }
 
@@ -496,13 +570,19 @@ export class LetterService {
   private async getStudent(userId: string) {
     const student = await this.prisma.studentProfile.findUnique({ where: { userId } });
     if (student === null) {
-      throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, 'No tienes un perfil de estudiante para solicitar una carta');
+      throw new BusinessException(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        'No tienes un perfil de estudiante para solicitar una carta',
+      );
     }
     return student;
   }
 
   private async getLetter(id: string): Promise<LetterDetail> {
-    const letter = await this.prisma.letterRequest.findUnique({ where: { id }, include: detailInclude });
+    const letter = await this.prisma.letterRequest.findUnique({
+      where: { id },
+      include: detailInclude,
+    });
     if (letter === null) {
       throw new BusinessException(HttpStatus.NOT_FOUND, 'Solicitud de carta no encontrada');
     }
@@ -532,15 +612,22 @@ export class LetterService {
       APPROVED: [],
       ANNULLED: [],
     };
-    throw new BusinessException(HttpStatus.CONFLICT, `La carta no permite esta accion desde el estado ${current}`, {
-      allowedTransitions: transitions[current],
-    });
+    throw new BusinessException(
+      HttpStatus.CONFLICT,
+      `La carta no permite esta accion desde el estado ${current}`,
+      {
+        allowedTransitions: transitions[current],
+      },
+    );
   }
 
   private assertComplete(letter: LetterSnapshot): void {
     const values = [letter.recipient, letter.position, letter.targetCompany, letter.practiceArea];
     if (values.some((value) => value.trim() === '')) {
-      throw new BusinessException(HttpStatus.UNPROCESSABLE_ENTITY, 'Completa los campos obligatorios de la carta antes de enviarla');
+      throw new BusinessException(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        'Completa los campos obligatorios de la carta antes de enviarla',
+      );
     }
   }
 
@@ -598,7 +685,10 @@ export class LetterService {
       typeof letter.templateData !== 'object' ||
       Array.isArray(letter.templateData)
     ) {
-      throw new BusinessException(HttpStatus.CONFLICT, 'Los datos de plantilla de la carta no son validos');
+      throw new BusinessException(
+        HttpStatus.CONFLICT,
+        'Los datos de plantilla de la carta no son validos',
+      );
     }
     return {
       recipient: letter.recipient,
@@ -615,7 +705,10 @@ export class LetterService {
 
   private templateContent(value: unknown): Record<string, unknown> {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-      throw new BusinessException(HttpStatus.CONFLICT, 'La configuracion de la plantilla de carta no es valida');
+      throw new BusinessException(
+        HttpStatus.CONFLICT,
+        'La configuracion de la plantilla de carta no es valida',
+      );
     }
     return value as Record<string, unknown>;
   }

@@ -13,8 +13,8 @@
 | Errores | Envelope único (04 §1); `allowedTransitions` en 409. |
 | Idempotencia | `Idempotency-Key` en acciones de envío (TK-030). |
 | Autorización | Guard de rol + servicio de ámbito central (ADR-007, matriz 02). |
-| Transiciones | Servicio por máquina de estado (03); sin PATCH de `status`. |
-| Auditoría | `AuditEvent` en la misma transacción (I-15, ADR-006). |
+| Transiciones | Servicio por máquina de estado (03); sin PATCH de `status`; `PracticeStatusHistory` append-only para prácticas. |
+| Auditoría | `AuditEvent` en la misma transacción; en práctica, estado + historial + auditoría atómicos (I-15, ADR-006). |
 | Pruebas | Unitarias por servicio de transición; e2e por módulo; matriz de acceso cruzado (TK-012). |
 | Lint/format | ESLint + Prettier, revisión en CI. |
 | Config | Variables de entorno tipadas (config de Nest) + `SystemParameter` para lo operativo (meta 700 h). |
@@ -49,25 +49,27 @@
 
 | Entregable | Historias |
 |---|---|
-| Empresa reutilizable con búsqueda por RUC; unicidad; extranjera sin RUC | HU-10 |
-| Expediente de práctica (crear/editar En preparación); vínculo carta aprobada "cuando corresponda" | HU-11 |
+| Empresa reutilizable y representantes como contactos sin cuenta; cambios de catálogo no mutan prácticas | HU-10 |
+| Expediente perteneciente a estudiante, empresa, representante, `AcademicPeriod` y `CampusSchool`; snapshot JSON del representante; crear/editar propio en `PREPARATION` | HU-11 |
+| Definiciones `INITIAL` activas copiadas a snapshots inmutables al crear; un documento por snapshot; checklist derivado | HU-11, HU-13 |
 | Vista consolidada de prácticas del estudiante con horas sumadas (derivadas) | HU-12 |
 | Checklist de inicio (calculado) | HU-13 |
-| Autorización/activación de práctica con bloqueos | HU-18 |
+| Autorización/activación por coordinador del mismo `CampusSchool`; estados actuales `PREPARATION`→`AUTHORIZED`→`ACTIVE` | HU-18 |
 | Suspender/cancelar/reactivar con motivo | HU-19 |
-| Validación técnica de archivos base (MIME/tamaño/estructura PDF) | HU-15 (base) |
+| Validación PDF técnica: extensión, MIME, `%PDF`, no vacío y máximo configurable; sin OCR/firma/semántica | HU-15 (base) |
 
-**Criterio de salida:** práctica solo se autoriza con checklist completo (TK-044, TK-048, TK-052, TK-072, TK-076).
+**Criterio de salida:** práctica solo se autoriza o activa con checklist inicial obligatorio aprobado (TK-044, TK-048, TK-052, TK-072, TK-076).
 
 ### Fase 3 — Documentos, versiones y excepciones (S3)
 
 | Entregable | Historias |
 |---|---|
-| Carga de documentos por tipo documental (carta de aceptación, convenio, plan); control de reemplazo | HU-14 |
-| Validación técnica automática completa (cuarentena de inválidos, mensajes accionables) | HU-15 |
-| Bandeja de revisión del coordinador: aprobar/observar/anular con comentario obligatorio | HU-16 |
-| Historial de versiones y observaciones vinculadas; inmutabilidad de aprobados | HU-17 |
-| `FileMeta` + adaptador `FileStorage` privado; descargas temporales auditadas | RNF-03, HU-17 |
+| `DocumentRequirementDefinition` versionada (`PDF`/`DIGITAL_RECORD`, `INITIAL`/`CLOSING`) y carga inicial de cuatro requisitos obligatorios | HU-14 |
+| Carga multipart y registro digital por snapshot; reemplazo crea nueva versión `PENDING`; envío de esa versión a `UNDER_REVIEW` | HU-14 |
+| Validación técnica PDF acotada y mensajes accionables; sin validación semántica | HU-15 |
+| Revisión de la versión actual exacta: aprobar/observar/anular; observado requiere nueva versión | HU-16 |
+| Historial de versiones y observaciones; documento/versión aprobados inmutables y sin borrado | HU-17 |
+| `FileAsset` + adaptador `FileStorage` privado; descargas exclusivamente por endpoint autorizado y auditado | RNF-03, HU-17 |
 
 **Criterio de salida:** ninguna carga inválida llega a revisión humana; versiones y comentarios trazables (TK-056, TK-060, TK-064, TK-068).
 
@@ -124,12 +126,12 @@
 
 ## 3. Orden sugerido de esquema Prisma (etapas de migración)
 
-1. `Campus`, `School`, `SchoolCampus`, `SystemParameter`.
+1. `Campus`, `School`, `CampusSchool`, `SystemParameter`.
 2. `User`, `Role`, `UserRole`, `StudentProfile`, `StaffProfile`.
 3. `AuditEvent`, `Notification`.
-4. `LetterTemplate`, `LetterRequest`, `LetterVersion`, `LetterDocument`, `FileMeta`.
-5. `Company`, `Period`, `Practice`, `PracticeAssignment`, `ImportBatch`.
-6. `DocumentType`, `Document`, `DocumentVersion`, `DocumentReview`.
+4. `LetterTemplate`, `LetterRequest`, `LetterVersion`, `LetterDocument`, `FileAsset`.
+5. `Company`, `CompanyRepresentative`, `AcademicPeriod`, `Practice`, `PracticeStatusHistory`, `PracticeAssignment`, `ImportBatch`.
+6. `DocumentRequirementDefinition`, `PracticeRequirementSnapshot`, `Document`, `DocumentVersion`, `DocumentReview`.
 7. `HourRecord`, `HourReview`.
 8. `Supervision`, `SupervisionReschedule`, `SupervisionResult`.
 9. `EvaluationTemplate`, `EvaluationDimension`, `EvaluationItem`, `Evaluation`, `EvaluationResponse`, `CompanyEvaluation`.
@@ -146,6 +148,7 @@ Cada migración incluye su seed de catálogo asociado.
 5. Auditoría de acciones críticas en la misma transacción.
 6. Pruebas unitarias de transiciones + e2e del flujo principal.
 7. Lint y format sin errores; TypeScript strict compila.
+8. Para práctica/documentos: snapshots y aprobados permanecen inmutables; estados, historial y auditoría se reconcilian; no existe ruta de borrado de documento.
 
 ## 5. Riesgos y mitigaciones
 

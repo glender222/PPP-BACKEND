@@ -6,11 +6,11 @@
 
 1. **Expediente = práctica.** No existe contenedor de prácticas; cada práctica es un expediente independiente (DEC-04).
 2. **Acumulación por estudiante.** La agregación de horas y el cumplimiento son **derivados** (RN-06, HU-36); no se persisten cifras editables.
-3. **Ámbito como dato estructural.** Toda entidad de negocio lleva `campusId` y `schoolId` resolubles; la autorización filtra siempre por ámbito (DEC-01, RN-10).
+3. **Ámbito como dato estructural.** Toda práctica pertenece a un `CampusSchool`; la autorización resuelve y filtra siempre por campus y escuela (DEC-01, RN-10).
 4. **Estados por acción.** Ninguna transición se produce mediante edición arbitraria de un campo `status`.
-5. **Documento = agregado versionado.** Los aprobados son inmutables; cada corrección crea versión (RN-09).
+5. **Requisito congelado y documento versionado.** Cada práctica conserva instantáneas inmutables de sus requisitos; cada documento tiene versiones y los aprobados son inmutables (RN-09).
 6. **Catálogos configurables.** Meta de horas, plantillas, instrumentos, campus, escuelas y periodos son datos, no constantes (RNF-08).
-7. **Archivos fuera de la base.** PostgreSQL guarda solo metadatos (hash, ruta interna, tamaño, MIME).
+7. **Archivos fuera de la base.** PostgreSQL guarda en `FileAsset` solo metadatos; los bytes permanecen privados en almacenamiento externo.
 
 ## 2. Entidades y atributos esenciales
 
@@ -20,8 +20,8 @@
 |---|---|---|
 | `Campus` | nombre, estado | Tres campus; catálogo administrado por `SYSTEM_ADMIN`. |
 | `School` | nombre, codigo, estado | Ingeniería de Sistemas activa; otras escuelas `INACTIVA` (preparadas, no activadas). |
-| `SchoolCampus` | schoolId, campusId, activo | Relación M:N; define dónde se ofrece cada escuela. |
-| `Period` | campusId, nombre, fechaInicio, fechaFin, estado | Lo abre/cierra el coordinador del campus (HU-04). Cerrar impide nuevas prácticas; no altera historial. |
+| `CampusSchool` | schoolId, campusId, activo | Relación M:N; define dónde se ofrece cada escuela y el ámbito de una práctica. |
+| `AcademicPeriod` | campusId, nombre, fechaInicio, fechaFin, estado | Lo abre/cierra el coordinador del campus (HU-04). Cerrar impide nuevas prácticas; no altera historial. |
 | `SystemParameter` | clave, valor, version, vigenteDesde, vigenteHasta | `PPP_HOURS_TARGET` (inicial 700), dominios de correo, límites de archivo, etc. Versionados. |
 
 ### 2.2. Identidad y personas
@@ -51,8 +51,10 @@ La plantilla conserva sus recursos gráficos y textos institucionales estáticos
 
 | Entidad | Atributos clave | Notas |
 |---|---|---|
-| `Company` | ruc (único, nullable), razonSocial, representante, cargo, direccion, contacto, area, esExtranjera | Reutilizable; búsqueda por RUC antes de crear (HU-10). Sin cuenta de usuario. |
-| `Practice` (expediente) | studentProfileId, campusId, schoolId, periodId, companyId, areaCargo, responsableEmpresarial, fechaInicio, fechaFin, horario, modalidad, letterRequestId (nullable), estado | Núcleo del expediente. El estado gobierna las operaciones. |
+| `Company` | ruc (único, nullable), razonSocial, direccion, contacto, area, esExtranjera | Reutilizable; búsqueda por RUC antes de crear (HU-10). Los cambios posteriores no alteran prácticas existentes. |
+| `CompanyRepresentative` | companyId, nombre, cargo, correo, telefono, otrosDatosContacto | Contacto reutilizable de una empresa; no es `User`, no inicia sesión y no recibe roles. |
+| `Practice` (expediente) | studentProfileId, companyId, academicPeriodId, campusSchoolId, companyRepresentativeId, representativeSnapshot (JSON), areaCargo, fechaInicio, fechaFin, horario, modalidad, letterRequestId (nullable), estado | Núcleo del expediente. La instantánea del representante se captura al crear. Empresa y representante no se sustituyen; cambiar de empresa exige una práctica nueva. |
+| `PracticeStatusHistory` | practiceId, estadoAnterior, estadoNuevo, actorId, motivo (nullable), fecha | Append-only; cada transición lo escribe junto con `AuditEvent` en una transacción. |
 | `PracticeAssignment` | practiceId, supervisorId (User), desde, hasta (nullable), motivo, activo | Historial de asignaciones; una vigente por práctica (HU-20). |
 | `ImportBatch` | campusId, archivoId, usuario, resumenValidacion, estado | Staging de migración de prácticas activas (HU-45, DEC-07). |
 
@@ -60,11 +62,14 @@ La plantilla conserva sus recursos gráficos y textos institucionales estáticos
 
 | Entidad | Atributos clave | Notas |
 |---|---|---|
-| `DocumentType` | codigo, etapa, obligatorio, condicional, soloLectura | `CARTA_ACEPTACION`, `CONVENIO`, `PLAN_TRABAJO`, `INFORME_FINAL`, `CONSTANCIA_CERTIFICADO`, `EVALUACION_EMPRESA`, `RECONOCIMIENTO`. |
-| `Document` | practiceId, typeId, estadoVigente | Entidad documental por (práctica, tipo); agrega sus versiones. |
-| `DocumentVersion` | documentId, version, archivoId, hash, mime, tamano, estado, validacionTecnica | Pendiente→En revisión→Observado→Aprobado/Anulado. Aprobada = inmutable. |
-| `DocumentReview` | documentVersionId, actorId, decision, comentario, fecha | Aprobar/observar/anular; observar exige comentario (HU-16). |
-| `FileMeta` | uuid interno, nombreOriginal, mime, tamano, hash, rutaPrivada, cargadoPor, cargadoEn | Todos los archivos del sistema; entregados solo con autorización temporal (RNF-03). |
+| `DocumentRequirementDefinition` | code, name, evidenceKind (`PDF`/`DIGITAL_RECORD`), stage (`INITIAL`/`CLOSING`), mandatory, version (entero), active | Catálogo versionado; cada `(code, version)` es inmutable y solo las versiones activas se usan para crear nuevas instantáneas. Reemplaza `DocumentType`. |
+| `PracticeRequirementSnapshot` | practiceId, requirementDefinitionId, code, name, evidenceKind, mandatory, version | Copia inmutable de cada definición `INITIAL` activa al crear la práctica. El checklist se deriva de estas filas, nunca del catálogo vigente. |
+| `Document` | requirementSnapshotId (único), currentVersionId (nullable), currentStatus (nullable) | Existe exactamente uno por instantánea; agrega sus versiones y refleja el estado de la versión actual. |
+| `DocumentVersion` | documentId, version, fileAssetId (nullable), digitalMetadata (JSON, nullable), estado, validacionTecnica | Una evidencia según `evidenceKind`. Carga o reemplazo crea una versión `PENDING`; `submit` transiciona esa misma versión a `UNDER_REVIEW`. |
+| `DocumentReview` | documentVersionId, actorId, decision, comentario, fecha | Revisa la versión actual exacta; aprobar/observar/anular solo desde `UNDER_REVIEW`. Observar exige comentario. |
+| `FileAsset` | storageKey, sha256, mime, size, originalName, metadata (JSON) | Solo metadatos de archivos cargados. Los bytes son privados fuera de PostgreSQL; toda descarga usa endpoint autorizado y auditado. |
+
+Definiciones iniciales obligatorias: carta de aceptación (PDF), convenio PPP (PDF), plan de trabajo (PDF) e información de empresa (`DIGITAL_RECORD`), todas en etapa `INITIAL`. Sus códigos estables forman parte de los datos de configuración; estos nombres no prescriben un valor de código concreto.
 
 ### 2.6. Horas
 
@@ -115,9 +120,9 @@ No existe combinación automática entre escala docente y nota empresarial (HU-3
 
 | Agregado | Raíz | Contenido | Consistencia |
 |---|---|---|---|
-| **Expediente de práctica** | `Practice` | Empresa de referencia, asignaciones, documentos, horas, supervisiones, evaluaciones | La autorización y el cierre evalúan el agregado completo; los subelementos no se mutan en aislamiento para decisiones de frontera. |
+| **Expediente de práctica** | `Practice` | Empresa y representante congelados, requisitos, asignaciones, documentos, horas, supervisiones, evaluaciones | La autorización y el cierre evalúan el agregado completo; las transiciones escriben `PracticeStatusHistory` y `AuditEvent` atómicamente. |
 | **Carta** | `LetterRequest` | Plantilla versionada, revisiones, decisiones, historial y archivo final | La aprobación genera el PDF final atómicamente (TK-026). |
-| **Documento** | `Document` | Versiones + revisiones | Observar/reenviar crea versión; aprobar congela la versión vigente. |
+| **Documento** | `Document` | Instantánea de requisito + versiones + revisiones | El reemplazo crea `PENDING`; el envío usa esa misma versión; aprobar congela documento y versión vigentes. |
 | **Supervisión** | `Supervision` | Reprogramaciones + resultado | Programar/registrar conservan historia. |
 | **Evaluación** | `Evaluation` | Plantilla versionada + respuestas | La finalización congela respuestas y versión del instrumento. |
 | **Cumplimiento PPP** | `StudentProfile` (derivado) | Suma de horas validadas de prácticas finalizadas vs. meta vigente | Cálculo reproducible; el estado no se edita (HU-36, TK-142). |
@@ -126,7 +131,7 @@ No existe combinación automática entre escala docente y nota empresarial (HU-3
 
 ### 4.1. Estructurales
 
-- I-01: Toda práctica pertenece a un campus y escuela en los que la escuela está activa (`SchoolCampus.activo`).
+- I-01: Toda práctica pertenece a un `CampusSchool` activo, a un `AcademicPeriod`, a un `StudentProfile`, a una `Company` y a un `CompanyRepresentative` de esa empresa.
 - I-02: Una carta aprobada puede vincularse a una sola práctica; la práctica puede existir sin carta si se autoriza por la vía confirmada (campo `letterRequestId` nullable, "cuando corresponda", HU-11).
 - I-03: Un `Company.ruc` es único cuando existe; `null` solo para empresas extranjeras.
 - I-04: La asignación de supervisor es vigente-única por práctica (`PracticeAssignment.activo`); el historial no se borra.
@@ -137,16 +142,18 @@ No existe combinación automática entre escala docente y nota empresarial (HU-3
 - I-06: Solo una práctica **Activa** admite envíos de horas; `Suspendida` los bloquea (HU-19).
 - I-07: `0 < horas <= 24` por registro; la fecha debe estar dentro del rango de la práctica (A-04: rechazo con advertencia).
 - I-08: Solo horas **Validadas** suman al avance; el **cumplimiento** considera solo horas validadas de prácticas **Finalizadas** (RN-06).
-- I-09: Autorizar una práctica exige datos completos y documentos iniciales obligatorios **Aprobados** (HU-18).
+- I-09: Autorizar o activar una práctica exige datos completos y que cada `PracticeRequirementSnapshot` inicial obligatorio tenga su único `Document` en `APPROVED` (HU-18).
 - I-10: Máximo una supervisión activa del mismo tipo por práctica (HU-25).
 - I-11: `NA` en ítems de evaluación se excluye del cálculo; no equivale a 0 (HU-28).
 - I-12: El reconocimiento solo se registra si el requisito está `Cumplido`; su registro transita a `Reconocido` (HU-37).
-- I-13: Todo documento observado conserva comentario y versiones; los aprobados no se sobrescriben ni eliminan físicamente (RN-09, RNF-04).
+- I-13: Todo documento observado conserva comentario; no puede reenviarse la versión observada y exige una nueva versión `PENDING`. Documento y versión aprobados no se sobrescriben ni eliminan y no existe ruta de borrado (RN-09, RNF-04).
 - I-14: Toda transición de estado exige motivo cuando el flujo lo define (observar, anular, suspender, cancelar, reasignar, reprogramar, reabrir).
+- I-14a: Las definiciones vigentes y los cambios de empresa o representante nunca mutan requisitos, empresa, representante ni `representativeSnapshot` de una práctica existente; cambiar de empresa crea otra práctica.
+- I-14b: Hay exactamente un `Document` por `PracticeRequirementSnapshot`. Cada versión contiene un `FileAsset` para `PDF` o `digitalMetadata` para `DIGITAL_RECORD`, nunca ambos.
 
 ### 4.3. De auditoría
 
-- I-15: Las acciones críticas (aprobar, observar, anular, transiciones, reasignaciones, descargas sensibles) generan `AuditEvent` dentro de la misma transacción (RNF-04).
+- I-15: Las acciones críticas (aprobar, observar, anular, transiciones, reasignaciones y descargas sensibles) generan `AuditEvent`; cada transición de práctica persiste además `PracticeStatusHistory`, ambos append-only y atómicos con el cambio de estado (RNF-04).
 - I-16: `AuditEvent` y `DocumentVersion` aprobadas son inmutables; no existen operaciones de update/delete sobre ellos.
 - I-17: El auditor no invoca ningún comando de escritura; la capa de autorización lo niega antes de llegar al servicio (RN-10, HU-43).
 
@@ -154,9 +161,9 @@ No existe combinación automática entre escala docente y nota empresarial (HU-3
 
 ```mermaid
 erDiagram
-    Campus ||--o{ SchoolCampus : ofrece
-    School ||--o{ SchoolCampus : se_ofrece
-    Campus ||--o{ Period : "opera periodo"
+    Campus ||--o{ CampusSchool : ofrece
+    School ||--o{ CampusSchool : se_ofrece
+    Campus ||--o{ AcademicPeriod : "opera periodo"
     Campus ||--o{ UserRole : "ámbito"
     Role ||--o{ UserRole : asigna
     User ||--o{ UserRole : tiene
@@ -166,7 +173,10 @@ erDiagram
     StudentProfile ||--o{ LetterRequest : solicita
     StudentProfile ||--o{ RecognitionRecord : recibe
     Company ||--o{ Practice : "emplea"
-    Period ||--o{ Practice : agrupa
+    Company ||--o{ CompanyRepresentative : registra
+    CompanyRepresentative ||--o{ Practice : "contacto elegido"
+    AcademicPeriod ||--o{ Practice : agrupa
+    CampusSchool ||--o{ Practice : delimita
     LetterTemplate ||--o{ LetterTemplateVersion : versiona
     LetterTemplateVersion ||--o{ LetterRequest : "usa"
     LetterRequest ||--o{ LetterRequestRevision : versiona
@@ -175,18 +185,20 @@ erDiagram
     LetterRequest ||--o| GeneratedLetterFile : "genera PDF"
     LetterRequest ||--o| Practice : "se vincula"
     Practice ||--o{ PracticeAssignment : "asigna supervisor"
-    Practice ||--o{ Document : contiene
-    DocumentType ||--o{ Document : clasifica
+    Practice ||--o{ PracticeStatusHistory : transiciona
+    DocumentRequirementDefinition ||--o{ PracticeRequirementSnapshot : origina
+    Practice ||--o{ PracticeRequirementSnapshot : congela
+    PracticeRequirementSnapshot ||--|| Document : exige
     Document ||--o{ DocumentVersion : versiona
     DocumentVersion ||--o{ DocumentReview : revisado
-    FileMeta ||--o| DocumentVersion : "respaldado por"
+    FileAsset ||--o| DocumentVersion : "respalda PDF"
     Practice ||--o{ HourRecord : "bitácora"
     HourRecord ||--o{ HourReview : revisado
-    FileMeta ||--o| HourRecord : "evidencia opcional"
+    FileAsset ||--o| HourRecord : "evidencia opcional"
     Practice ||--o{ Supervision : programa
     Supervision ||--o{ SupervisionReschedule : reprograma
     Supervision ||--o| SupervisionResult : concluye
-    FileMeta ||--o| SupervisionResult : "evidencia"
+    FileAsset ||--o| SupervisionResult : "evidencia"
     EvaluationTemplate ||--o{ EvaluationDimension : estructura
     EvaluationDimension ||--o{ EvaluationItem : contiene
     Evaluation ||--o{ EvaluationResponse : responde
@@ -194,8 +206,8 @@ erDiagram
     EvaluationTemplate ||--o{ Evaluation : "versión usada"
     Practice ||--o{ Evaluation : "evaluación docente"
     Practice ||--o| CompanyEvaluation : "evaluación empresa"
-    FileMeta ||--o| CompanyEvaluation : "PDF firmado"
-    FileMeta ||--o| RecognitionRecord : "evidencia"
+    FileAsset ||--o| CompanyEvaluation : "PDF firmado"
+    FileAsset ||--o| RecognitionRecord : "evidencia"
     User ||--o{ AuditEvent : ejecuta
     User ||--o{ Notification : recibe
 ```
@@ -204,15 +216,19 @@ erDiagram
 
 | Relación | Cardinalidad | Significado |
 |---|---|---|
-| Campus ↔ School | M:N (vía `SchoolCampus`) | Sistemas en tres campus; otras escuelas inactivas. |
+| Campus ↔ School | M:N (vía `CampusSchool`) | Sistemas en tres campus; otras escuelas inactivas. |
 | User ↔ Role | M:N (vía `UserRole`) | Rol + ámbito; multi-rol preparado. |
 | StudentProfile ↔ Practice | 1:N | Varias prácticas (expedientes) por estudiante. |
 | Practice ↔ Company | N:1 | Una empresa por práctica; empresa reutilizable. |
-| Practice ↔ Period | N:1 | Práctica asociada a periodo sin perder fechas reales. |
+| Company ↔ CompanyRepresentative | 1:N | Contactos sin cuenta de usuario. |
+| Practice ↔ CompanyRepresentative | N:1 | Representante elegido y además congelado como JSON al crear. |
+| Practice ↔ AcademicPeriod | N:1 | Práctica asociada a periodo sin perder fechas reales. |
+| Practice ↔ CampusSchool | N:1 | Ámbito institucional inmutable del expediente. |
 | Practice ↔ LetterRequest | 1:0..1 | Carta aprobada vinculada "cuando corresponda". |
 | LetterRequest ↔ LetterRequestRevision | 1:N | Cada envío conserva una instantánea inmutable. |
 | LetterRequestRevision ↔ LetterReviewDecision | 1:N | Las decisiones quedan trazadas contra la revisión revisada. |
-| Practice ↔ Document | 1:N | Un documento vigente por (práctica, tipo). |
+| Practice ↔ PracticeRequirementSnapshot | 1:N | Requisitos iniciales activos congelados al crear. |
+| PracticeRequirementSnapshot ↔ Document | 1:1 | Exactamente un agregado documental por requisito congelado. |
 | Document ↔ DocumentVersion | 1:N | Versionado incremental e inmutable. |
 | Practice ↔ HourRecord | 1:N | Bitácora periódica. |
 | Practice ↔ Supervision | 1:N | Tipos entrada/intermedia/final; uno activo por tipo. |

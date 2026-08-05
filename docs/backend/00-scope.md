@@ -1,7 +1,7 @@
 # 00 — Alcance del sistema y fuentes
 
 > Sistema de Prácticas Preprofesionales (PPP) — UPeU.
-> Versión del documento: 1.0 — 2026-08-04.
+> Versión del documento: 1.1 — 2026-08-05.
 > Estado: referencia de alcance para el backend del MVP.
 
 ## 1. Orden de autoridad de las fuentes
@@ -34,8 +34,10 @@ La única meta cuantitativa adoptada es la **meta de PPP configurable, inicializ
 | Acumulación | Un estudiante puede **acumular horas validadas de varias prácticas**. |
 | Secretaría | Participa dentro del sistema (cuenta y bandeja de cartas de su campus). |
 | Carta | Se **genera desde plantilla**; el estudiante **no sube la carta**. |
-| Empresa | **Sin cuenta**; participa mediante documentos firmados externamente. |
-| Documentos | PDF con revisiones, observaciones y versiones; aprobados inmutables. |
+| Empresa | `Company` es reutilizable. Sus representantes son datos de contacto (`CompanyRepresentative`), **sin cuenta de usuario**. |
+| Práctica | Pertenece al perfil del estudiante, empresa, representante elegido, periodo académico y campus-escuela. Conserva una instantánea del representante; cambiar de empresa exige una práctica nueva. |
+| Requisitos | Definiciones versionadas por etapa y tipo de evidencia; al crear la práctica se congelan los requisitos iniciales activos en instantáneas inmutables. El checklist se deriva de ellas. |
+| Documentos | Evidencia PDF o registro digital con revisiones y versiones; exactamente un documento por instantánea de requisito y aprobados inmutables. |
 | Supervisión | Programación y registro de supervisiones por el docente asignado. |
 | Evaluación empresarial | Cargada como **PDF firmado externamente**. |
 | Cierre | Cierre por práctica y documento individual indispensable de reconocimiento. |
@@ -50,7 +52,7 @@ La única meta cuantitativa adoptada es la **meta de PPP configurable, inicializ
 |---|---|
 | `SYSTEM_ADMIN` | Administra estructura, accesos, parámetros y seguridad. **No adquiere automáticamente permisos operativos de coordinador.** |
 | `AUDITOR` | Consulta global de los tres campus, **solo lectura; nunca modifica datos**. |
-| `COORDINATOR` | Opera sobre su campus (autorizaciones, revisiones, cierre). |
+| `COORDINATOR` | Opera sobre su campus-escuela (autorizaciones, revisiones, cierre). |
 | `SECRETARY` | Bandeja y revisión de cartas de su campus. |
 | `SUPERVISOR` | Docente supervisor: prácticas asignadas (supervisiones y evaluaciones). |
 | `STUDENT` | Propiedad sobre su perfil, solicitudes, expedientes y registros. |
@@ -81,6 +83,10 @@ Nota: el backlog (DEC-01) menciona "cinco roles internos" (estudiante, secretar�
 - Meta inicial **700 horas configurable** (RN-07).
 - La validación automática es técnica; firma, sello y coherencia requieren revisión humana (RN-08).
 - Documentos observados conservan comentarios y versiones; aprobados no se sobrescriben (RN-09).
+- Para PDF, la validación técnica comprueba únicamente extensión `.pdf`, MIME `application/pdf`, bytes mágicos `%PDF`, contenido no vacío y tamaño máximo configurable; no realiza OCR ni validación de firma o contenido.
+- Al crear una práctica se copian las definiciones `INITIAL` activas: carta de aceptación, convenio PPP y plan de trabajo como PDF, e información de empresa como `DIGITAL_RECORD`; las cuatro son obligatorias inicialmente.
+- El estudiante crea y edita únicamente sus prácticas `PREPARATION`; un coordinador del mismo `CampusSchool` autoriza y activa. Ambas acciones exigen que todos los requisitos iniciales obligatorios tengan documento `APPROVED`.
+- Cada transición de práctica escribe `PracticeStatusHistory` y `AuditEvent` append-only dentro de la misma transacción.
 - Secretaría y coordinador por campus; docente por asignación; auditor en tres campus sin editar (RN-10).
 - Migración inicial solo de prácticas activas (RN-15, DEC-07).
 
@@ -104,7 +110,7 @@ Estos ítems se registran como configuración **pendiente** con diseño de inter
 1. Los cinco roles funcionales operan con aislamiento correcto por campus/asignación.
 2. La carta se solicita, genera, observa, corrige, aprueba y descarga dentro del sistema.
 3. Un estudiante gestiona varias prácticas sin mezclar expedientes y con horas consolidadas.
-4. Documentos, horas, supervisiones y evaluaciones conservan estados, comentarios, versiones y auditoría.
+4. Los requisitos de cada práctica no cambian al versionar el catálogo; documentos, horas, supervisiones y evaluaciones conservan estados, comentarios, versiones y auditoría.
 5. El coordinador autoriza, monitorea, cierra prácticas y registra el reconocimiento individual.
 6. El auditor consulta los tres campus en solo lectura.
 7. Reportes y totales se reconcilian con el detalle de los expedientes.

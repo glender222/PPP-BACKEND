@@ -4,6 +4,8 @@ import {
   RoleAssignmentState,
   AcademicPeriodState,
   SchoolState,
+  RequirementEvidenceKind,
+  RequirementStage,
 } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -216,6 +218,48 @@ async function main(): Promise<void> {
       state: 'ACTIVE',
     },
   });
+
+  const initialRequirements = [
+    {
+      code: 'ACCEPTANCE_LETTER',
+      name: 'Carta de aceptación',
+      evidenceKind: RequirementEvidenceKind.PDF,
+    },
+    {
+      code: 'PPP_AGREEMENT',
+      name: 'Convenio de PPP',
+      evidenceKind: RequirementEvidenceKind.PDF,
+    },
+    {
+      code: 'WORK_PLAN',
+      name: 'Plan de trabajo',
+      evidenceKind: RequirementEvidenceKind.PDF,
+    },
+    {
+      code: 'COMPANY_INFORMATION',
+      name: 'Información de la empresa',
+      evidenceKind: RequirementEvidenceKind.DIGITAL_RECORD,
+    },
+  ];
+  for (const requirement of initialRequirements) {
+    await prisma.documentRequirementDefinition.upsert({
+      where: { code_version: { code: requirement.code, version: 1 } },
+      update: {
+        name: requirement.name,
+        evidenceKind: requirement.evidenceKind,
+        stage: RequirementStage.INITIAL,
+        mandatory: true,
+        active: true,
+      },
+      create: {
+        ...requirement,
+        stage: RequirementStage.INITIAL,
+        mandatory: true,
+        version: 1,
+        active: true,
+      },
+    });
+  }
 
   for (const campus of CAMPUSES) {
     await prisma.academicPeriod.upsert({

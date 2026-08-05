@@ -77,7 +77,10 @@ export class LetterController {
   @Roles(Role.STUDENT)
   @RequirePermission('letter:write')
   @ResourceAccess({ permission: 'letter:write', mode: 'load', resourceType: 'LetterRequest' })
-  submit(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string): Promise<LetterView> {
+  submit(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<LetterView> {
     return this.letters.submit(user, id);
   }
 
@@ -110,7 +113,10 @@ export class LetterController {
   @Roles(Role.STUDENT, Role.SECRETARY, Role.COORDINATOR, Role.AUDITOR)
   @RequirePermission('letter:read')
   @ResourceAccess({ permission: 'letter:read', mode: 'load', resourceType: 'LetterRequest' })
-  history(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string): Promise<LetterView> {
+  history(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<LetterView> {
     return this.letters.getDetail(user, id);
   }
 
@@ -154,7 +160,10 @@ export class LetterController {
   @Roles(Role.SECRETARY)
   @RequirePermission('letter:review')
   @ResourceAccess({ permission: 'letter:review', mode: 'load', resourceType: 'LetterRequest' })
-  approve(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string): Promise<LetterView> {
+  approve(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<LetterView> {
     return this.letters.approve(user, id);
   }
 

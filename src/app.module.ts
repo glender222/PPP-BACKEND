@@ -10,11 +10,13 @@ import { AuthModule } from './modules/auth/auth.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { ClosingModule } from './modules/closing/closing.module';
 import { CompanyModule } from './modules/company/company.module';
+import { DocumentModule } from './modules/document/document.module';
 import { EvaluationModule } from './modules/evaluation/evaluation.module';
 import { HealthModule } from './modules/health/health.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { LetterModule } from './modules/letter/letter.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
+import { PracticeModule } from './modules/practice/practice.module';
 import { SupervisionModule } from './modules/supervision/supervision.module';
 
 @Module({
@@ -60,6 +62,8 @@ import { SupervisionModule } from './modules/supervision/supervision.module';
     AuditModule,
     LetterModule,
     CompanyModule,
+    PracticeModule,
+    DocumentModule,
     SupervisionModule,
     EvaluationModule,
     ClosingModule,

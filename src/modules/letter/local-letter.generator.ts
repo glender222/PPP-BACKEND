@@ -37,7 +37,14 @@ export class LocalLetterGenerator implements LetterGeneratorPort {
       this.image('ImSeal', this.moveDown(positions.assets['sello_directora.jpg'], 37), page),
       this.image('ImSignature', this.moveDown(positions.assets['firma_directora.jpg'], 28), page),
       this.centeredText(template.nationalYearPhrase, 112, 10, 'F2', page),
-      this.text(`${template.dateLocation}, ${this.formatDate(input.issuedAt)}`, 355, 190, 10, 'F1', page),
+      this.text(
+        `${template.dateLocation}, ${this.formatDate(input.issuedAt)}`,
+        355,
+        190,
+        10,
+        'F1',
+        page,
+      ),
       this.text(
         input.preview
           ? 'VISTA PREVIA - SIN VALIDEZ OFICIAL'
@@ -49,7 +56,15 @@ export class LocalLetterGenerator implements LetterGeneratorPort {
         page,
       ),
       this.text('Sr.', 35, 320, 11, 'F1', page),
-      ...this.textBlock([input.recipient, input.position, input.targetCompany], 35, 338, 12, 17, 'F2', page),
+      ...this.textBlock(
+        [input.recipient, input.position, input.targetCompany],
+        35,
+        338,
+        12,
+        17,
+        'F2',
+        page,
+      ),
       this.text('Presente. -', 35, 405, 11, 'F1', page),
       this.text('De mi especial consideración:', 35, 440, 11, 'F1', page),
       ...this.paragraph(
@@ -106,8 +121,12 @@ export class LocalLetterGenerator implements LetterGeneratorPort {
       this.object(
         `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${page.width_pt} ${page.height_pt}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> /XObject << /ImLogo 7 0 R /ImSeal 8 0 R /ImSignature 9 0 R >> >> /Contents 6 0 R >>`,
       ),
-      this.object('<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>'),
-      this.object('<< /Type /Font /Subtype /Type1 /BaseFont /Times-Bold /Encoding /WinAnsiEncoding >>'),
+      this.object(
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>',
+      ),
+      this.object(
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Times-Bold /Encoding /WinAnsiEncoding >>',
+      ),
       this.streamObject(`<< /Length ${content.length} >>`, content),
       this.pngObject(logo),
       this.jpegObject(stamp),
@@ -127,11 +146,17 @@ export class LocalLetterGenerator implements LetterGeneratorPort {
 
   private templateValues(template: Record<string, unknown>): TemplateValues {
     return {
-      nationalYearPhrase: this.stringValue(template.nationalYearPhrase, 'Universidad Peruana Unión'),
+      nationalYearPhrase: this.stringValue(
+        template.nationalYearPhrase,
+        'Universidad Peruana Unión',
+      ),
       dateLocation: this.stringValue(template.dateLocation, 'UPeU'),
       signerName: this.stringValue(template.signerName, 'Dirección de Escuela'),
       signerTitle: this.stringValue(template.signerTitle, 'DIRECCIÓN E.P. INGENIERÍA DE SISTEMAS'),
-      signerFaculty: this.stringValue(template.signerFaculty, 'FACULTAD DE INGENIERÍA Y ARQUITECTURA'),
+      signerFaculty: this.stringValue(
+        template.signerFaculty,
+        'FACULTAD DE INGENIERÍA Y ARQUITECTURA',
+      ),
       footer: this.stringValue(template.footer, 'Universidad Peruana Unión'),
     };
   }
@@ -159,9 +184,22 @@ export class LocalLetterGenerator implements LetterGeneratorPort {
     return `BT /${font} ${size} Tf 1 0 0 1 ${x} ${page.height_pt - top} Tm (${this.escape(value)}) Tj ET`;
   }
 
-  private centeredText(value: string, top: number, size: number, font: 'F1' | 'F2', page: PdfPage): string {
+  private centeredText(
+    value: string,
+    top: number,
+    size: number,
+    font: 'F1' | 'F2',
+    page: PdfPage,
+  ): string {
     const estimatedWidth = value.length * size * (font === 'F2' ? 0.55 : 0.5);
-    return this.text(value, Math.max(25, (page.width_pt - estimatedWidth) / 2), top, size, font, page);
+    return this.text(
+      value,
+      Math.max(25, (page.width_pt - estimatedWidth) / 2),
+      top,
+      size,
+      font,
+      page,
+    );
   }
 
   private textBlock(
@@ -173,7 +211,9 @@ export class LocalLetterGenerator implements LetterGeneratorPort {
     font: 'F1' | 'F2',
     page: PdfPage,
   ): string[] {
-    return lines.map((line, index) => this.text(line, x, top + index * lineHeight, size, font, page));
+    return lines.map((line, index) =>
+      this.text(line, x, top + index * lineHeight, size, font, page),
+    );
   }
 
   private paragraph(
@@ -260,7 +300,9 @@ export class LocalLetterGenerator implements LetterGeneratorPort {
   }
 
   private escape(value: string): string {
-    return value.replace(/[\\()\r\n]/g, (character) => (character === '\n' || character === '\r' ? ' ' : `\\${character}`));
+    return value.replace(/[\\()\r\n]/g, (character) =>
+      character === '\n' || character === '\r' ? ' ' : `\\${character}`,
+    );
   }
 
   private object(dictionary: string): Buffer {
@@ -268,7 +310,11 @@ export class LocalLetterGenerator implements LetterGeneratorPort {
   }
 
   private streamObject(dictionary: string, stream: Buffer): Buffer {
-    return Buffer.concat([Buffer.from(`${dictionary}\nstream\n`, 'ascii'), stream, Buffer.from('\nendstream', 'ascii')]);
+    return Buffer.concat([
+      Buffer.from(`${dictionary}\nstream\n`, 'ascii'),
+      stream,
+      Buffer.from('\nendstream', 'ascii'),
+    ]);
   }
 
   private jpegObject(source: Buffer): Buffer {
@@ -289,7 +335,7 @@ export class LocalLetterGenerator implements LetterGeneratorPort {
   }
 
   private jpegDimensions(source: Buffer): { width: number; height: number } {
-    for (let offset = 2; offset < source.length - 9; ) {
+    for (let offset = 2; offset < source.length - 9;) {
       if (source[offset] !== 0xff) {
         offset += 1;
         continue;
@@ -313,7 +359,7 @@ export class LocalLetterGenerator implements LetterGeneratorPort {
       throw new Error('El logo de la carta debe ser PNG RGB o RGBA de 8 bits');
     }
     const chunks: Buffer[] = [];
-    for (let offset = 8; offset < source.length; ) {
+    for (let offset = 8; offset < source.length;) {
       const length = source.readUInt32BE(offset);
       const type = source.subarray(offset + 4, offset + 8).toString('ascii');
       if (type === 'IDAT') {
@@ -332,7 +378,8 @@ export class LocalLetterGenerator implements LetterGeneratorPort {
         const index = row * width * channels + column;
         const left = column >= channels ? decoded[index - channels]! : 0;
         const up = row > 0 ? decoded[index - width * channels]! : 0;
-        const upLeft = row > 0 && column >= channels ? decoded[index - width * channels - channels]! : 0;
+        const upLeft =
+          row > 0 && column >= channels ? decoded[index - width * channels - channels]! : 0;
         decoded[index] = this.unfilter(filter, raw, left, up, upLeft);
       }
     }

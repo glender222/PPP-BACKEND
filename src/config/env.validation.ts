@@ -16,6 +16,7 @@ export interface AppEnv {
   APP_JWT_SECRET: string;
   APP_JWT_TTL: JwtTtl;
   DEV_AUTH_PASSWORD: string;
+  MAX_PDF_SIZE_BYTES: number;
 }
 
 const envSchema = Joi.object({
@@ -33,6 +34,10 @@ const envSchema = Joi.object({
   APP_JWT_SECRET: Joi.string().min(16).default('dev-only-jwt-secret-change-me'),
   APP_JWT_TTL: Joi.string().default('8h'),
   DEV_AUTH_PASSWORD: Joi.string().min(6).default('PppDev!2026'),
+  MAX_PDF_SIZE_BYTES: Joi.number()
+    .integer()
+    .positive()
+    .default(10 * 1024 * 1024),
 });
 
 export function validateEnv(config: Record<string, unknown>): AppEnv {

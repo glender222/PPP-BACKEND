@@ -175,7 +175,12 @@ describe('Carta de presentacion (e2e)', () => {
       select: { action: true },
     });
     expect(auditActions.map((event) => event.action)).toEqual(
-      expect.arrayContaining(['LETTER_SUBMITTED', 'LETTER_OBSERVED', 'LETTER_RESUBMITTED', 'LETTER_APPROVED']),
+      expect.arrayContaining([
+        'LETTER_SUBMITTED',
+        'LETTER_OBSERVED',
+        'LETTER_RESUBMITTED',
+        'LETTER_APPROVED',
+      ]),
     );
     expect(auditActions.filter((event) => event.action === 'LETTER_APPROVED')).toHaveLength(1);
     const notifications = await prisma.notification.findMany({
