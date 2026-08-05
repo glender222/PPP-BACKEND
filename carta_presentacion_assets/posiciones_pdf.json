@@ -1,0 +1,33 @@
+{
+  "page": {
+    "format": "A4",
+    "width_pt": 595.56,
+    "height_pt": 842.04
+  },
+  "coordinate_system": "PDF points, origin top-left for these rectangles",
+  "assets": {
+    "logo_upeu_ingenieria_sistemas.png": {
+      "x": 85.08,
+      "y": 41.04,
+      "width": 344.28,
+      "height": 39.12
+    },
+    "firma_directora.jpg": {
+      "x": 216.0,
+      "y": 662.88,
+      "width": 162.72,
+      "height": 46.20
+    },
+    "sello_directora.jpg": {
+      "x": 95.04,
+      "y": 638.16,
+      "width": 91.44,
+      "height": 92.88
+    }
+  },
+  "notes": [
+    "The source PDF contains selectable text and three embedded graphical assets.",
+    "Do not treat the 2024 national-year phrase as permanently fixed; version it per template revision.",
+    "Use a university-approved font on the server for final production."
+  ]
+}

@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ppp-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ppp
+      POSTGRES_PASSWORD: ppp_dev_password
+      POSTGRES_DB: ppp_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - ppp_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ppp -d ppp_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ppp_postgres_data:

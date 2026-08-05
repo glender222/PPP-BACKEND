@@ -1,0 +1,442 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum InstitutionState {
+  ACTIVE
+  INACTIVE
+}
+
+enum CampusState {
+  ACTIVE
+  INACTIVE
+}
+
+enum FacultyState {
+  ACTIVE
+  INACTIVE
+}
+
+enum SchoolState {
+  ACTIVE
+  INACTIVE
+}
+
+enum UserState {
+  ACTIVE
+  INACTIVE
+}
+
+enum RoleAssignmentState {
+  ACTIVE
+  INACTIVE
+}
+
+enum AcademicPeriodState {
+  DRAFT
+  OPEN
+  CLOSED
+}
+
+enum PppPolicyVersionState {
+  ACTIVE
+  SUPERSEDED
+}
+
+enum Role {
+  SYSTEM_ADMIN
+  AUDITOR
+  COORDINATOR
+  SECRETARY
+  SUPERVISOR
+  STUDENT
+}
+
+enum SecurityEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILURE
+  DEV_PROVIDER_REJECTED
+  TOKEN_INVALID
+}
+
+enum LetterRequestStatus {
+  DRAFT
+  SUBMITTED
+  OBSERVED
+  RESUBMITTED
+  APPROVED
+  ANNULLED
+}
+
+enum LetterReviewDecisionType {
+  OBSERVED
+  APPROVED
+  ANNULLED
+}
+
+model Institution {
+  id                 String                  @id @default(uuid())
+  code               String                  @unique
+  name               String
+  shortName          String?
+  state              InstitutionState        @default(ACTIVE)
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  campuses           Campus[]
+  faculties          Faculty[]
+  identityDomains    InstitutionalIdentity[]
+  pppPolicyVersions  PppPolicyVersion[]
+}
+
+model Campus {
+  id                String             @id @default(uuid())
+  institutionId     String
+  institution       Institution        @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  name              String
+  code              String             @unique
+  state             CampusState        @default(ACTIVE)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  campusSchools     CampusSchool[]
+  academicPeriods   AcademicPeriod[]
+  userProfiles      UserProfile[]
+  studentProfiles   StudentProfile[]
+  roleAssignments   RoleAssignment[]
+  auditEvents       AuditEvent[]
+  letterTemplates   LetterTemplate[]
+  letterRequests    LetterRequest[]
+
+  @@index([institutionId])
+}
+
+model Faculty {
+  id            String      @id @default(uuid())
+  institutionId String
+  institution   Institution @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  name          String
+  code          String
+  state         FacultyState @default(ACTIVE)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  schools       School[]
+
+  @@unique([institutionId, code])
+}
+
+model School {
+  id              String           @id @default(uuid())
+  facultyId       String
+  faculty         Faculty          @relation(fields: [facultyId], references: [id], onDelete: Restrict)
+  name            String
+  code            String
+  state           SchoolState      @default(ACTIVE)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  campusSchools   CampusSchool[]
+  studentProfiles StudentProfile[]
+  roleAssignments RoleAssignment[]
+  letterTemplates LetterTemplate[]
+  letterRequests  LetterRequest[]
+
+  @@unique([facultyId, code])
+}
+
+model CampusSchool {
+  id        String   @id @default(uuid())
+  campusId  String
+  campus    Campus   @relation(fields: [campusId], references: [id], onDelete: Restrict)
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([campusId, schoolId])
+}
+
+model User {
+  id                      String            @id @default(uuid())
+  state                   UserState         @default(ACTIVE)
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+  institutionalIdentity   InstitutionalIdentity?
+  userProfile             UserProfile?
+  studentProfile          StudentProfile?
+  roleAssignments         RoleAssignment[]
+  assignedRoleAssignments RoleAssignment[]  @relation("AssignmentAuthor")
+  auditEvents             AuditEvent[]
+  securityEvents          SecurityEvent[]
+  notifications           Notification[]
+  letterReviewDecisions   LetterReviewDecision[]
+  letterStateHistories    LetterStateHistory[]
+}
+
+model InstitutionalIdentity {
+  id                         String   @id @default(uuid())
+  userId                     String   @unique
+  user                       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  institutionId              String
+  institution                Institution @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  institutionalEmail         String   @unique
+  identityProviderExternalId String?  @unique
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  @@index([institutionId])
+}
+
+model UserProfile {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName    String
+  displayName String?
+  campusId    String?
+  campus      Campus?  @relation(fields: [campusId], references: [id], onDelete: SetNull)
+  staffActive Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([campusId])
+}
+
+model StudentProfile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String   @unique
+  dni       String
+  cycle     String?
+  campusId  String
+  campus    Campus   @relation(fields: [campusId], references: [id], onDelete: Restrict)
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  complete  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  letterRequests LetterRequest[]
+
+  @@index([campusId])
+  @@index([schoolId])
+}
+
+model LetterTemplate {
+  id        String   @id @default(uuid())
+  campusId  String
+  campus    Campus   @relation(fields: [campusId], references: [id], onDelete: Restrict)
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  versions  LetterTemplateVersion[]
+
+  @@unique([campusId, schoolId])
+  @@index([campusId, schoolId, active])
+}
+
+model LetterTemplateVersion {
+  id          String   @id @default(uuid())
+  templateId  String
+  template    LetterTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  version     Int
+  content     Json
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  requests    LetterRequest[]
+  generatedFiles GeneratedLetterFile[]
+
+  @@unique([templateId, version])
+  @@index([templateId, isActive])
+}
+
+model LetterRequest {
+  id                String              @id @default(uuid())
+  studentProfileId  String
+  studentProfile    StudentProfile      @relation(fields: [studentProfileId], references: [id], onDelete: Restrict)
+  campusId          String
+  campus            Campus              @relation(fields: [campusId], references: [id], onDelete: Restrict)
+  schoolId          String
+  school            School              @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  templateVersionId String
+  templateVersion   LetterTemplateVersion @relation(fields: [templateVersionId], references: [id], onDelete: Restrict)
+  recipient         String
+  position          String
+  targetCompany     String
+  practiceArea      String
+  templateData      Json
+  status            LetterRequestStatus @default(DRAFT)
+  number            String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  revisions         LetterRequestRevision[]
+  reviewDecisions   LetterReviewDecision[]
+  generatedFile     GeneratedLetterFile?
+  stateHistory      LetterStateHistory[]
+
+  @@index([studentProfileId, status])
+  @@index([campusId, schoolId, status])
+}
+
+model LetterRequestRevision {
+  id              String          @id @default(uuid())
+  letterRequestId String
+  letterRequest   LetterRequest   @relation(fields: [letterRequestId], references: [id], onDelete: Restrict)
+  version         Int
+  content         Json
+  createdAt       DateTime        @default(now())
+  decisions       LetterReviewDecision[]
+  generatedFiles  GeneratedLetterFile[]
+
+  @@unique([letterRequestId, version])
+}
+
+model LetterReviewDecision {
+  id              String                   @id @default(uuid())
+  letterRequestId String
+  letterRequest   LetterRequest            @relation(fields: [letterRequestId], references: [id], onDelete: Restrict)
+  revisionId      String
+  revision        LetterRequestRevision    @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+  reviewerId      String
+  reviewer        User                     @relation(fields: [reviewerId], references: [id], onDelete: Restrict)
+  decision        LetterReviewDecisionType
+  comment         String?
+  createdAt       DateTime                 @default(now())
+
+  @@index([letterRequestId])
+  @@index([revisionId])
+}
+
+model GeneratedLetterFile {
+  id                String                @id @default(uuid())
+  letterRequestId   String                @unique
+  letterRequest     LetterRequest         @relation(fields: [letterRequestId], references: [id], onDelete: Restrict)
+  revisionId        String
+  revision          LetterRequestRevision @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+  templateVersionId String
+  templateVersion   LetterTemplateVersion @relation(fields: [templateVersionId], references: [id], onDelete: Restrict)
+  number            String
+  fileName          String
+  mimeType          String
+  size              Int
+  sha256            String
+  storagePath       String
+  generatedAt       DateTime              @default(now())
+}
+
+model LetterStateHistory {
+  id              String              @id @default(uuid())
+  letterRequestId String
+  letterRequest   LetterRequest       @relation(fields: [letterRequestId], references: [id], onDelete: Restrict)
+  fromStatus      LetterRequestStatus?
+  toStatus        LetterRequestStatus
+  actorId         String?
+  actor           User?               @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  comment         String?
+  createdAt       DateTime            @default(now())
+
+  @@index([letterRequestId, createdAt])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  message   String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt])
+}
+
+model RoleAssignment {
+  id           String               @id @default(uuid())
+  userId       String
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role         Role
+  campusId     String?
+  campus       Campus?              @relation(fields: [campusId], references: [id], onDelete: Restrict)
+  schoolId     String?
+  school       School?              @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  state        RoleAssignmentState  @default(ACTIVE)
+  validFrom    DateTime?
+  validTo      DateTime?
+  assignedById String?
+  assignedBy   User?                @relation("AssignmentAuthor", fields: [assignedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  @@index([userId, state])
+  @@index([campusId])
+  @@index([schoolId])
+}
+
+model AcademicPeriod {
+  id        String               @id @default(uuid())
+  campusId  String
+  campus    Campus               @relation(fields: [campusId], references: [id], onDelete: Restrict)
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  state     AcademicPeriodState  @default(DRAFT)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  @@unique([campusId, name])
+  @@index([campusId])
+}
+
+model PppPolicyVersion {
+  id            String               @id @default(uuid())
+  institutionId String
+  institution   Institution          @relation(fields: [institutionId], references: [id], onDelete: Restrict)
+  key           String
+  value         Json
+  version       Int
+  state         PppPolicyVersionState @default(ACTIVE)
+  validFrom     DateTime?
+  validTo       DateTime?
+  createdAt     DateTime             @default(now())
+
+  @@unique([institutionId, key, version])
+}
+
+model AuditEvent {
+  id        String   @id @default(uuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorRole Role?
+  campusId  String?
+  campus    Campus?  @relation(fields: [campusId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String
+  result    String
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  @@index([campusId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+model SecurityEvent {
+  id        String             @id @default(uuid())
+  userId    String?
+  user      User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  type      SecurityEventType
+  detail    Json?
+  ipAddress String?
+  createdAt DateTime           @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}

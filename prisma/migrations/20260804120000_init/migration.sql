@@ -1,0 +1,1 @@
+-- Migration vacía inicial: baseline de infraestructura (sin modelos de dominio aún).
