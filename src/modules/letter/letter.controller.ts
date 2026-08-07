@@ -10,8 +10,11 @@ import {
   Put,
   Query,
   Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import type { Response } from 'express';
 import type { AuthUser } from '../../common/authorization/auth-user';
@@ -26,8 +29,9 @@ import {
   ObserveLetterDto,
   SecretaryLetterQueryDto,
   UpdateLetterDto,
+  UpdateSignatureConfigDto,
 } from './dto/letter.dto';
-import { LetterService, LetterView } from './letter.service';
+import { LetterService, LetterView, SignatureConfigView } from './letter.service';
 
 @ApiTags('Letters')
 @ApiBearerAuth()
@@ -178,5 +182,25 @@ export class LetterController {
     @Body() dto: AnnulLetterDto,
   ): Promise<LetterView> {
     return this.letters.annul(user, id, dto.motivo);
+  }
+
+  @Get('secretary/signature-config')
+  @Roles(Role.SECRETARY)
+  @RequirePermission('letter:review')
+  getSignatureConfig(@CurrentUser() user: AuthUser): Promise<SignatureConfigView> {
+    return this.letters.getSignatureConfig(user);
+  }
+
+  @Put('secretary/signature-config')
+  @Roles(Role.SECRETARY)
+  @RequirePermission('letter:review')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  updateSignatureConfig(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: UpdateSignatureConfigDto,
+    @UploadedFile() file?: { buffer: Buffer; originalname: string; mimetype: string },
+  ): Promise<SignatureConfigView> {
+    return this.letters.updateSignatureConfig(user, dto, file);
   }
 }

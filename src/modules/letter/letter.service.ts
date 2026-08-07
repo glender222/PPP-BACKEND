@@ -7,10 +7,24 @@ import { ScopePolicyService } from '../../common/authorization/scope-policy.serv
 import { BusinessException } from '../../common/exceptions/business.exception';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateLetterDto, UpdateLetterDto } from './dto/letter.dto';
+import { CreateLetterDto, UpdateLetterDto, UpdateSignatureConfigDto } from './dto/letter.dto';
 import { LETTER_FILE_STORAGE, LetterFileStoragePort } from './letter-file-storage.port';
 import { LETTER_GENERATOR, LetterGeneratorPort } from './letter-generator.port';
 import { LETTER_NUMBERING, LetterNumberingPort } from './letter-numbering.port';
+
+export interface SignatureConfigView {
+  templateId: string | null;
+  templateVersionId: string | null;
+  version: number;
+  signerName: string;
+  signerTitle: string;
+  signerFaculty: string;
+  active: boolean;
+  hasSignature: boolean;
+  hasSeal: boolean;
+  signatureUrl: string | null;
+  sealUrl: string | null;
+}
 
 const detailInclude = Prisma.validator<Prisma.LetterRequestInclude>()({
   studentProfile: {
@@ -348,13 +362,38 @@ export class LetterService {
         'La carta enviada no tiene una revision para aprobar',
       );
     }
+    const template = this.templateContent(letter.templateVersion.content);
+    const signerName = typeof template.signerName === 'string' ? template.signerName.trim() : '';
+    const signerTitle =
+      typeof template.signerTitle === 'string' ? template.signerTitle.trim() : '';
+    const signerFaculty =
+      typeof template.signerFaculty === 'string' ? template.signerFaculty.trim() : '';
+    const hasSignature =
+      template.hasSignature === true ||
+      (typeof template.signatureUrl === 'string' && template.signatureUrl.trim() !== '');
+    const hasSeal =
+      template.hasSeal === true ||
+      (typeof template.sealUrl === 'string' && template.sealUrl.trim() !== '');
+
+    if (
+      signerName === '' ||
+      signerTitle === '' ||
+      signerFaculty === '' ||
+      !hasSignature ||
+      !hasSeal
+    ) {
+      throw new BusinessException(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        'No se puede aprobar la carta de presentacion: La Escuela Profesional no tiene cargados o activos la firma digital, el sello oficial y los datos del Director',
+      );
+    }
     const snapshot = revision.content as unknown as LetterSnapshot;
     const number = await this.numbering.nextNumber(letter.id);
     const generated = await this.generator.generate({
       ...snapshot,
       requestId: id,
       number,
-      template: this.templateContent(letter.templateVersion.content),
+      template,
       preview: false,
     });
     const fileName = `letter-${id}-${revision.version}.pdf`;
@@ -776,5 +815,163 @@ export class LetterService {
               generatedAt: letter.generatedFile.generatedAt,
             },
     };
+  }
+
+  async getSignatureConfig(actor: AuthUser): Promise<SignatureConfigView> {
+    const scope = this.getSecretaryScope(actor);
+    const template = await this.prisma.letterTemplate.findFirst({
+      where: { campusId: scope.campusId, schoolId: scope.schoolId },
+      include: {
+        versions: { orderBy: { version: 'desc' }, take: 1 },
+      },
+    });
+
+    if (template === null || template.versions.length === 0) {
+      return {
+        templateId: null,
+        templateVersionId: null,
+        version: 0,
+        signerName: '',
+        signerTitle: '',
+        signerFaculty: '',
+        active: false,
+        hasSignature: false,
+        hasSeal: false,
+        signatureUrl: null,
+        sealUrl: null,
+      };
+    }
+
+    const latestVersion = template.versions[0];
+    if (!latestVersion) {
+      return {
+        templateId: template.id,
+        templateVersionId: null,
+        version: 0,
+        signerName: '',
+        signerTitle: '',
+        signerFaculty: '',
+        active: false,
+        hasSignature: false,
+        hasSeal: false,
+        signatureUrl: null,
+        sealUrl: null,
+      };
+    }
+
+    const content = this.templateContent(latestVersion.content);
+
+    return {
+      templateId: template.id,
+      templateVersionId: latestVersion.id,
+      version: latestVersion.version,
+      signerName: typeof content.signerName === 'string' ? content.signerName : '',
+      signerTitle: typeof content.signerTitle === 'string' ? content.signerTitle : '',
+      signerFaculty: typeof content.signerFaculty === 'string' ? content.signerFaculty : '',
+      active: template.active && latestVersion.isActive,
+      hasSignature: content.hasSignature === true || Boolean(content.signatureUrl),
+      hasSeal: content.hasSeal === true || Boolean(content.sealUrl),
+      signatureUrl: typeof content.signatureUrl === 'string' ? content.signatureUrl : null,
+      sealUrl: typeof content.sealUrl === 'string' ? content.sealUrl : null,
+    };
+  }
+
+  async updateSignatureConfig(
+    actor: AuthUser,
+    dto: UpdateSignatureConfigDto,
+    file?: { buffer: Buffer; originalname: string; mimetype: string },
+  ): Promise<SignatureConfigView> {
+    const scope = this.getSecretaryScope(actor);
+
+    let storedFileKey: string | undefined = undefined;
+    if (file !== undefined) {
+      const allowedMimes = ['image/png', 'image/jpeg', 'image/jpg', 'image/svg+xml', 'image/gif'];
+      if (!allowedMimes.includes(file.mimetype)) {
+        throw new BusinessException(
+          HttpStatus.BAD_REQUEST,
+          'Formato de imagen no soportado. Usa PNG, JPG, SVG o GIF.',
+        );
+      }
+      const fileName = `signature-${scope.campusId}-${scope.schoolId}-${Date.now()}-${file.originalname}`;
+      storedFileKey = await this.storage.store(fileName, file.buffer);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      let template = await tx.letterTemplate.findFirst({
+        where: { campusId: scope.campusId, schoolId: scope.schoolId },
+        include: { versions: { orderBy: { version: 'desc' }, take: 1 } },
+      });
+
+      if (template === null) {
+        template = await tx.letterTemplate.create({
+          data: {
+            campusId: scope.campusId,
+            schoolId: scope.schoolId,
+            name: 'Carta de presentacion PPP',
+            active: dto.active ?? true,
+          },
+          include: { versions: { orderBy: { version: 'desc' }, take: 1 } },
+        });
+      } else if (dto.active !== undefined) {
+        await tx.letterTemplate.update({
+          where: { id: template.id },
+          data: { active: dto.active },
+        });
+      }
+
+      const latestVersion = template.versions[0];
+      const prevContent = latestVersion ? this.templateContent(latestVersion.content) : {};
+      const newVersionNumber = (latestVersion?.version ?? 0) + 1;
+
+      const newContent = {
+        ...prevContent,
+        signerName: dto.signerName,
+        signerTitle: dto.signerTitle,
+        signerFaculty:
+          dto.signerFaculty ?? prevContent.signerFaculty ?? 'FACULTAD DE INGENIERÍA Y ARQUITECTURA',
+        hasSignature: storedFileKey !== undefined ? true : (prevContent.hasSignature ?? true),
+        hasSeal: storedFileKey !== undefined ? true : (prevContent.hasSeal ?? true),
+        signatureUrl:
+          storedFileKey ?? prevContent.signatureUrl ?? 'carta_presentacion_assets/firma_directora.jpg',
+        sealUrl:
+          storedFileKey ?? prevContent.sealUrl ?? 'carta_presentacion_assets/sello_directora.jpg',
+      };
+
+      if (latestVersion) {
+        await tx.letterTemplateVersion.updateMany({
+          where: { templateId: template.id },
+          data: { isActive: false },
+        });
+      }
+
+      await tx.letterTemplateVersion.create({
+        data: {
+          templateId: template.id,
+          version: newVersionNumber,
+          content: newContent,
+          isActive: dto.active ?? true,
+        },
+      });
+
+      await this.audit.recordAudit(
+        this.auditEntry(actor, scope.campusId, 'SIGNATURE_CONFIG_UPDATED', template.id),
+        tx,
+      );
+    });
+
+    return this.getSignatureConfig(actor);
+  }
+
+  private getSecretaryScope(actor: AuthUser): { campusId: string; schoolId: string } {
+    const assignment = actor.roles.find(
+      (r) => r.role === Role.SECRETARY && r.campusId !== null && r.schoolId !== null,
+    );
+    if (!assignment?.campusId || !assignment?.schoolId) {
+      throw new BusinessException(
+        HttpStatus.FORBIDDEN,
+        'Debes ser Secretaria asignada a un campus y escuela profesional para configurar firmas.',
+      );
+    }
+    return { campusId: assignment.campusId, schoolId: assignment.schoolId };
   }
 }

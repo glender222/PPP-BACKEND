@@ -33,9 +33,18 @@ export class LocalLetterGenerator implements LetterGeneratorPort {
     const page = positions.page;
     const template = this.templateValues(input.template);
     const commands = [
+      ...(input.preview ? [this.watermark(page)] : []),
       this.image('ImLogo', positions.assets['logo_upeu_ingenieria_sistemas.png'], page),
-      this.image('ImSeal', this.moveDown(positions.assets['sello_directora.jpg'], 37), page),
-      this.image('ImSignature', this.moveDown(positions.assets['firma_directora.jpg'], 28), page),
+      ...(input.preview
+        ? []
+        : [
+            this.image('ImSeal', this.moveDown(positions.assets['sello_directora.jpg'], 37), page),
+            this.image(
+              'ImSignature',
+              this.moveDown(positions.assets['firma_directora.jpg'], 28),
+              page,
+            ),
+          ]),
       this.centeredText(template.nationalYearPhrase, 112, 10, 'F2', page),
       this.text(
         `${template.dateLocation}, ${this.formatDate(input.issuedAt)}`,
@@ -109,9 +118,13 @@ export class LocalLetterGenerator implements LetterGeneratorPort {
         page,
       ),
       this.text('Cordialmente,', 35, 652, 11, 'F1', page),
-      this.centeredText(template.signerName, 754, 11, 'F1', page),
-      this.centeredText(template.signerTitle, 772, 11, 'F2', page),
-      this.centeredText(template.signerFaculty, 788, 10, 'F1', page),
+      ...(input.preview
+        ? []
+        : [
+            this.centeredText(template.signerName, 754, 11, 'F1', page),
+            this.centeredText(template.signerTitle, 772, 11, 'F2', page),
+            this.centeredText(template.signerFaculty, 788, 10, 'F1', page),
+          ]),
       this.centeredText(template.footer, 826, 7, 'F1', page),
     ];
     const content = Buffer.from(commands.join('\n'), 'latin1');
@@ -163,6 +176,20 @@ export class LocalLetterGenerator implements LetterGeneratorPort {
 
   private stringValue(value: unknown, fallback: string): string {
     return typeof value === 'string' && value.trim() !== '' ? value : fallback;
+  }
+
+  private watermark(page: PdfPage): string {
+    const text = 'B O R R A D O R';
+    return [
+      'q',
+      '0.88 0.88 0.88 rg',
+      'BT',
+      '/F2 50 Tf',
+      `0.7071 0.7071 -0.7071 0.7071 120 ${Math.round(page.height_pt / 2)} cm`,
+      `(${this.escape(text)}) Tj`,
+      'ET',
+      'Q',
+    ].join('\n');
   }
 
   private image(name: string, rectangle: PdfRectangle, page: PdfPage): string {

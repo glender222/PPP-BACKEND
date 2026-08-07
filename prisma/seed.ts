@@ -177,6 +177,10 @@ async function main(): Promise<void> {
       signerTitle: 'DIRECTORA E.P. INGENIERÍA DE SISTEMAS',
       signerFaculty: 'FACULTAD DE INGENIERÍA Y ARQUITECTURA',
       footer: 'Universidad Peruana Unión',
+      hasSignature: true,
+      hasSeal: true,
+      signatureUrl: 'carta_presentacion_assets/firma_directora.jpg',
+      sealUrl: 'carta_presentacion_assets/sello_directora.jpg',
     };
     const template = await prisma.letterTemplate.upsert({
       where: {

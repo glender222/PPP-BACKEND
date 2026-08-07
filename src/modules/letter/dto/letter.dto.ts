@@ -1,5 +1,5 @@
-import { Type } from 'class-transformer';
-import { IsEnum, IsNotEmpty, IsObject, IsOptional, IsString } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsBoolean, IsEnum, IsNotEmpty, IsObject, IsOptional, IsString } from 'class-validator';
 import { LetterRequestStatus } from '@prisma/client';
 
 export class CreateLetterDto {
@@ -73,3 +73,23 @@ export class SecretaryLetterQueryDto extends LetterStatusQueryDto {
   @IsString()
   q?: string;
 }
+
+export class UpdateSignatureConfigDto {
+  @IsString()
+  @IsNotEmpty()
+  signerName!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  signerTitle!: string;
+
+  @IsOptional()
+  @IsString()
+  signerFaculty?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  active?: boolean;
+}
+

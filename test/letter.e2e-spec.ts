@@ -236,4 +236,54 @@ describe('Carta de presentacion (e2e)', () => {
       .send({ comentario: 'No corresponde a mi campus.' })
       .expect(403);
   });
+
+interface SignatureConfigResponse {
+  signerName: string;
+  signerTitle: string;
+  active: boolean;
+}
+
+  it('gestiona la configuracion de firma exclusivamente para la Secretaria del campus', async () => {
+    // 1. Obtener la configuracion inicial de la Secretaria de Juliaca
+    const initialConfig = await request(server)
+      .get('/api/v1/secretary/signature-config')
+      .set(bearer(secretaryJuliacaToken))
+      .expect(200);
+
+    const initialBody = initialConfig.body as SignatureConfigResponse;
+    expect(initialConfig.body).toHaveProperty('signerName');
+    expect(initialConfig.body).toHaveProperty('signerTitle');
+    expect(initialBody.active).toBe(true);
+
+    // 2. Actualizar la configuracion de firma por la Secretaria de Juliaca
+    const updated = await request(server)
+      .put('/api/v1/secretary/signature-config')
+      .set(bearer(secretaryJuliacaToken))
+      .send({
+        signerName: 'Dr. Carlos Eduardo Mendez Ruiz',
+        signerTitle: 'Director de Carrera - Ingenieria de Sistemas',
+        active: true,
+      })
+      .expect(200);
+
+    const updatedBody = updated.body as SignatureConfigResponse;
+    expect(updatedBody.signerName).toBe('Dr. Carlos Eduardo Mendez Ruiz');
+    expect(updatedBody.signerTitle).toBe('Director de Carrera - Ingenieria de Sistemas');
+
+    // 3. Estudiante intenta acceder o actualizar y recibe 403 Forbidden
+    await request(server)
+      .get('/api/v1/secretary/signature-config')
+      .set(bearer(studentJuliacaToken))
+      .expect(403);
+
+    await request(server)
+      .put('/api/v1/secretary/signature-config')
+      .set(bearer(studentJuliacaToken))
+      .send({
+        signerName: 'Nombre Invalido',
+        signerTitle: 'Cargo Invalido',
+      })
+      .expect(403);
+  });
 });
+
