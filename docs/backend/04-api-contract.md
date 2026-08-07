@@ -52,10 +52,12 @@
 | POST | `/letters/{id}/resubmit` | STUDENT | Propio | `{ datosPlantilla, Idempotency-Key }` | `200 { estado: REENVIADA }` | 400, 403, 404, 409 | Observada → Reenviada (nueva versión) |
 | GET | `/letters/{id}/history` | Propietario; COORDINATOR campus; SECRETARY campus; AUDITOR global | Según rol | — | `LetterDetailDto { historial[], revisiones[], decisiones[] }` | 401, 403, 404 | — |
 | GET | `/secretary/letters` | SECRETARY | Campus | `?estado=ENVIADA\|REENVIADA` | `[LetterSummaryDto]` | 401, 403 | — |
-| POST | `/secretary/letters/{id}/approve` | SECRETARY | Campus | `{}` | `201 { letter, documentoPdf }` | 403, 404, 409 | Enviada/Reenviada → Aprobada (genera PDF atómico) |
+| POST | `/secretary/letters/{id}/approve` | SECRETARY | Campus | `{}` | `201 { letter, documentoPdf }` | 403, 404, 409, 422 | Enviada/Reenviada → Aprobada (valida firma/sello activa y genera PDF atómico) |
 | POST | `/secretary/letters/{id}/observe` | SECRETARY | Campus | `ObserveDto { comentario }` | `200` | 400, 403, 404, 409 | Enviada/Reenviada → Observada |
 | POST | `/secretary/letters/{id}/annul` | SECRETARY | Campus | `AnnulDto { motivo }` | `200` | 400, 403, 404, 409 | Enviada/Reenviada → Anulada |
 | GET | `/letters/{id}/download` | Propietario; SECRETARY campus; COORDINATOR campus; AUDITOR global | Según rol | — | `application/pdf` (temporal) | 401, 403, 404, 409 (no Aprobada) | Descarga auditada (RNF-03) |
+| GET | `/secretary/signature-config` | SECRETARY | Campus | — | `SignatureConfigView` | 401, 403 | Consulta firma, sello y datos del firmante del campus |
+| PUT | `/secretary/signature-config` | SECRETARY | Campus | `UpdateSignatureConfigDto` + file (multipart) | `SignatureConfigView` | 400, 401, 403 | Actualiza firma, sello y datos del firmante (crea nueva versión) |
 
 ## 5. Módulo empresa
 

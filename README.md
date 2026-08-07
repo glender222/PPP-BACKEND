@@ -10,8 +10,8 @@ Implementado y cubierto por pruebas en las fases base:
 - Identidad de desarrollo, sesiones JWT y perfiles de estudiante.
 - Autorizacion centralizada por rol, campus, escuela, propiedad y asignacion.
 - Catalogos institucionales, periodos, parametros configurables y auditoria append-only.
-- Carta de presentacion: borrador, vista previa PDF, envio, observacion, correccion, reenvio, aprobacion, descarga privada, historial, notificaciones y auditoria.
-- Generacion de PDF desde plantilla versionada con logo, firma y sello institucionales. Los datos de destinatario, empresa, area, estudiante, codigo y ciclo se rellenan desde datos del sistema.
+- Carta de presentacion: borrador con marca de agua diagonal `BORRADOR`, vista previa PDF, envio, observacion, correccion, reenvio, configuracion de firma por Secretaria (`GET/PUT /secretary/signature-config`), aprobacion con validacion estricta de firma/sello, descarga privada, historial, notificaciones y auditoria.
+- Generacion de PDF desde plantilla versionada con logo, firma y sello institucionales. Omitidos en vista previa e incrustados con coordenadas exactas al aprobar. Los datos de destinatario, empresa, area, estudiante, codigo y ciclo se rellenan desde datos del sistema.
 
 La entrega actual incorpora un subconjunto de las fases 2 y 3 con cobertura unitaria y e2e para sus reglas críticas:
 
@@ -174,10 +174,11 @@ La contrasena de desarrollo por defecto es `PppDev!2026`; se configura mediante 
 ### Flujo de carta de presentacion
 
 1. Como estudiante, cree la solicitud con `POST /letters`.
-2. Revise el borrador con `GET /letters/{id}/preview` y envie con `POST /letters/{id}/submit`.
+2. Revise el borrador con `GET /letters/{id}/preview` (incluye marca de agua diagonal `BORRADOR` de fondo y omite sello/firma) y envie con `POST /letters/{id}/submit`.
 3. Como Secretaria del mismo campus, consulte `GET /secretary/letters`.
-4. Observe con `POST /secretary/letters/{id}/observe` o apruebe con `POST /secretary/letters/{id}/approve`.
-5. Una aprobacion genera el PDF final. El estudiante autorizado puede descargarlo mediante `GET /letters/{id}/download`.
+4. Como Secretaria del mismo campus, consulte o configure los datos del Director (nombre, cargo, facultad) y suba la imagen de firma/sello con `GET/PUT /secretary/signature-config`.
+5. Observe con `POST /secretary/letters/{id}/observe` o apruebe con `POST /secretary/letters/{id}/approve` (valida obligatoriamente que la Escuela tenga cargada y activa la firma/sello oficial).
+6. Una aprobacion genera el PDF final inmutable. El estudiante autorizado puede descargarlo mediante `GET /letters/{id}/download`.
 
 ### Flujo posterior: empresa, practica y documentos
 
