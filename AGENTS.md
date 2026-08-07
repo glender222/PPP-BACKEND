@@ -25,6 +25,7 @@
 - `configureApp()` in `src/app.setup.ts` installs the `/api/v1` prefix, global validation, error envelope, Helmet/CORS, logger, and Scalar. Call it in every e2e Nest application or results will not match production.
 - Keep API errors in the documented envelope: `statusCode`, `error`, `message`, optional `details` and `allowedTransitions`.
 - Scalar is intentionally pinned to `@scalar/nestjs-api-reference` 0.5.x and mounted with `apiReference(...)`. Newer 1.x releases pull ESM rendering dependencies that break the current CommonJS `ts-jest` setup.
+- Always decorate DTO class properties with `@ApiProperty({ example: '...', description: '...' })` or `@ApiPropertyOptional(...)` from `@nestjs/swagger` so OpenAPI / Scalar pre-populates interactive request JSON bodies with realistic default examples instead of empty `{}`.
 - Use the singleton `Logger` from `nestjs-pino` for global infrastructure (for example, exception filters); `PinoLogger` is request-scoped and cannot be retrieved with `app.get()`.
 
 ## Authorization and audit invariants
